@@ -9,7 +9,7 @@ from telegram.error import TelegramError
 BOT_TOKEN = "8212401543:AAHbG82cYrrLZb3Rk33jpGWCKR9r6_mpYTQ"  # ضع توكن البوت الحقيقي هنا
 CHAT_ID = 6968612778  # chat id الخاص بك
 VIDEOS_DIR = "videos"
-DEFAULT_SEND_INTERVAL = 10  # ثواني بين كل فيديو بشكل افتراضي
+DEFAULT_SEND_INTERVAL = 50  # ثواني بين كل فيديو بشكل افتراضي
 STATE_FILE = "state.json"  # لحفظ حالة آخر فيديو تم إرساله
 # ============================================
 
