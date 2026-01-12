@@ -91,6 +91,7 @@ def save_state(state):
         logger.error(f"خطأ في حفظ state.json: {e}")
 
 # ================== VIDEOS ==================
+# ================== VIDEOS ==================
 def scan_videos():
     try:
         os.makedirs(VIDEOS_DIR, exist_ok=True)
@@ -102,10 +103,15 @@ def scan_videos():
             if any(filename.lower().endswith(ext) for ext in video_extensions):
                 filepath = os.path.join(VIDEOS_DIR, filename)
                 if os.path.exists(filepath):
+                    # Remove extension from caption
+                    caption_without_ext = os.path.splitext(filename)[0]
+                    # Add custom text
+                    final_caption = f"{caption_without_ext}\n\n✅ أو راسلنا واكتب مهتم"
+                    
                     videos.append({
                         "path": filepath,
                         "filename": filename,
-                        "caption": filename[:1000],
+                        "caption": final_caption[:1000],  # Limit to 1000 chars
                         "size": os.path.getsize(filepath)
                     })
         
