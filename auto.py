@@ -1,3 +1,18 @@
+import subprocess
+import sys
+
+# تثبيت المكتبات تلقائيًا
+def install_packages():
+    packages = ['flask', 'python-telegram-bot', 'requests']
+    for package in packages:
+        try:
+            __import__(package.replace('-', '_'))
+        except ImportError:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', package])
+
+install_packages()
+
+# ثم استمر في باقي imports
 from flask import Flask, jsonify, request
 import os
 import asyncio
@@ -8,8 +23,8 @@ from datetime import datetime
 from telegram import Bot, error as telegram_error
 import threading
 import requests
-import sys
 
+# [باقي الكود كما هو...]
 # ================== FLASK APP ==================
 app = Flask(__name__)
 
