@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: telegram-video-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python auto.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: CHAT_ID
+        sync: false
+      - key: PORT
+        value: 10000
