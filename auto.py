@@ -9,8 +9,8 @@ from telegram import Bot
 from telegram.error import TelegramError, RetryAfter, TimedOut, NetworkError
 
 # ================== CONFIG ==================
-BOT_TOKEN = os.getenv"8212401543:AAHbG82cYrrLZb3Rk33jpGWCKR9r6_mpYTQ")  # ضروري تحطه في Render ENV
-CHAT_ID = int(os.getenv"6968612778"
+BOT_TOKEN = os.getenv"(8212401543:AAHbG82cYrrLZb3Rk33jpGWCKR9r6_mpYTQ)"  # ضروري تحطه في Render ENV
+CHAT_ID = int"(os.getenv6968612778)"
 VIDEOS_DIR = "videos"
 SEND_INTERVAL = 300
 STATE_FILE = "state.json"
