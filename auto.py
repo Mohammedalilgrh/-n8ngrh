@@ -95,13 +95,6 @@ def scan_videos():
         logger.error(f"خطأ في قراءة الفيديوهات: {e}")
         return []
 
-def get_video_index_by_filename(videos, filename):
-    """الحصول على индекс الفيديو بناءً على اسم الملف"""
-    for i, video in enumerate(videos):
-        if video["filename"] == filename:
-            return i
-    return -1
-
 # ================== إرسال الفيديوهات ==================
 async def initialize_bot():
     """تهيئة البوت مع إعادة المحاولة"""
@@ -136,15 +129,12 @@ async def send_video_safely(bot, video_info):
             
             logger.info(f"محاولة إرسال الفيديو: {video_info['filename']} (المحاولة {attempt + 1})")
             
+            # إرسال الفيديو بدون معاملات timeout الإضافية
             with open(video_info["path"], "rb") as vfile:
                 await bot.send_video(
                     chat_id=CHAT_ID,
                     video=vfile,
-                    caption=video_info["caption"],
-                    timeout=120,
-                    read_timeout=120,
-                    write_timeout=120,
-                    connect_timeout=120
+                    caption=video_info["caption"]
                 )
             
             logger.info(f"تم إرسال الفيديو بنجاح: {video_info['filename']}")
