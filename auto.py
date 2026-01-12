@@ -1,3 +1,4 @@
+from flask import Flask, jsonify, request
 import os
 import asyncio
 import json
@@ -5,6 +6,24 @@ import logging
 import time
 from datetime import datetime
 from telegram import Bot, error as telegram_error
+import threading
+import requests
+import sys
+
+# ================== FLASK APP ==================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return jsonify({
+        "status": "running",
+        "message": "Telegram Video Bot is active",
+        "timestamp": datetime.now().isoformat()
+    })
+
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy"})
 
 # ================== CONFIG ==================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAHbG82cYrrLZb3Rk33jpGWCKR9r6_mpYTQ")
@@ -24,6 +43,7 @@ VIDEOS_DIR = "videos"
 SEND_INTERVAL = 300  # 5 دقائق
 STATE_FILE = "state.json"
 LOG_FILE = "bot.log"
+
 # ============================================
 
 # ================== LOGGING ==================
@@ -119,13 +139,24 @@ async def send_video(bot, video):
         return True
         
     except telegram_error.RetryAfter as e:
-        logger.warning(f"⏳ انتظر {e.retry_after} ثانية")
+        logger.warning(f"⏳ ا(wait) {e.retry_after} seconds")
         await asyncio.sleep(e.retry_after)
         return False
         
     except Exception as e:
         logger.error(f"❌ خطأ في الإرسال: {e}")
         return False
+
+# ================== KEEP ALIVE FUNCTION ==================
+def keep_alive():
+    """Function to ping the Render app to keep it awake"""
+    while True:
+        try:
+            response = requests.get(f"http://localhost:{PORT}/health")
+            logger.info(f"Keep-alive ping response: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Keep-alive error: {e}")
+        time.sleep(250)  # Ping every ~4 minutes
 
 # ================== MAIN LOOP ==================
 async def main_loop():
@@ -176,16 +207,38 @@ async def main_loop():
             logger.error(f"❌ خطأ في الحلقة الرئيسية: {e}")
             await asyncio.sleep(30)
 
-# ================== START ==================
+# ================== RUN BOTH FLASK AND BOT ==================
+def run_flask():
+    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+
+def run_keep_alive():
+    keep_alive()
+
 if __name__ == "__main__":
+    # Get port from environment variable or default to 10000
+    PORT = int(os.environ.get('PORT', 10000))
+    
     # طباعة معلومات البدء
     print("=" * 50)
-    print("🤖 Telegram Video Bot")
+    print("🤖 Telegram Video Bot - Advanced Version")
     print(f"👤 Chat ID: {CHAT_ID}")
     print(f"📁 Videos Directory: {os.path.abspath(VIDEOS_DIR)}")
     print(f"⏰ Interval: {SEND_INTERVAL} seconds")
+    print(f"🌐 Port: {PORT}")
     print("=" * 50)
     
+    # Create threads
+    flask_thread = threading.Thread(target=run_flask)
+    keep_alive_thread = threading.Thread(target=run_keep_alive)
+    
+    # Start threads
+    flask_thread.daemon = True
+    keep_alive_thread.daemon = True
+    
+    flask_thread.start()
+    keep_alive_thread.start()
+    
+    # Run the main loop
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
