@@ -56,10 +56,13 @@ else:
     exit(1)
 
 VIDEOS_DIR = "videos"
-SEND_INTERVAL = 300  # 5 دقائق
+SEND_INTERVAL = int(os.getenv("SEND_INTERVAL", "300"))
 STATE_FILE = "state.json"
 LOG_FILE = "bot.log"
 
+logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
+logger.info(f"🔧 [DEBUG] SEND_INTERVAL = {SEND_INTERVAL}")
+await asyncio.sleep(SEND_INTERVAL)
 # ============================================
 
 # ================== LOGGING ==================
@@ -195,6 +198,7 @@ def keep_alive():
         time.sleep(250)  # Ping every ~4 minutes
 
 # ================== MAIN LOOP ==================
+# ================== MAIN LOOP ==================
 async def main_loop():
     logger.info("🚀 بدء تشغيل البوت...")
     
@@ -229,19 +233,24 @@ async def main_loop():
             logger.info(f"🎬 إرسال الفيديو ({next_index+1}/{len(videos)}): {video_to_send['filename']}")
             
             # الإرسال
-            if await send_video(bot, video_to_send):
+            success = await send_video(bot, video_to_send)
+            
+            if success:
+                logger.info(f"✅ تم إرسال '{video_to_send['filename']}' بنجاح.")
                 state["last_sent_index"] = next_index
                 state["last_sent_time"] = datetime.now().isoformat()
                 save_state(state)
-            
-            logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
-            await asyncio.sleep(SEND_INTERVAL)
+                logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
+                await asyncio.sleep(SEND_INTERVAL) # انتظار طويل عند النجاح
+            else:
+                logger.warning(f"⚠️ فشل إرسال '{video_to_send['filename']}'. الانتظار 30 ثانية قبل إعادة المحاولة.")
+                await asyncio.sleep(30) # انتظار قصير عند الفشل لتجنب المشاكل
             
         except KeyboardInterrupt:
             break
         except Exception as e:
             logger.error(f"❌ خطأ في الحلقة الرئيسية: {e}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(30) # انتظار عند حدوث خطأ غير متوقع
 
 # ================== RUN BOTH FLASK AND BOT ==================
 def run_flask():
