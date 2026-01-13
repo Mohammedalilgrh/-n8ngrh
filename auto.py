@@ -158,28 +158,33 @@ async def send_video(bot, video):
             )
         
         # Forward to channel
+      async def send_video(bot, video):
+    try:
         CHANNEL_ID = "@N8ntestgrhchannell"
-        try:
-            await bot.forward_message(
+
+        logger.info(f"📤 إرسال مباشر للقناة: {video['filename']}")
+
+        with open(video["path"], "rb") as f:
+            message = await bot.send_video(
                 chat_id=CHANNEL_ID,
-                from_chat_id=CHAT_ID,
-                message_id=message.message_id
+                video=f,
+                caption=video["caption"],
+                supports_streaming=True
             )
-            logger.info(f"✅ تم التوجيه للقناة: {CHANNEL_ID}")
-        except Exception as forward_error:
-            logger.error(f"❌ خطأ في التوجيه للقناة: {forward_error}")
-        
-        logger.info(f"✅ تم الإرسال: {video['filename']}")
+
+        # ✅ هنا تحصل على file_id
+        file_id = message.video.file_id
+        logger.info(f"🆔 FILE_ID: {file_id}")
+
         return True
-        
+
     except telegram_error.RetryAfter as e:
-        logger.warning(f"⏳ ا(wait) {e.retry_after} seconds")
         await asyncio.sleep(e.retry_after)
         return False
-        
     except Exception as e:
         logger.error(f"❌ خطأ في الإرسال: {e}")
         return False
+
 
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
