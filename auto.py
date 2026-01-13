@@ -42,7 +42,7 @@ def health():
     return jsonify({"status": "healthy"})
 
 # ================== CONFIG ==================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAHbG82cYrrLZb3Rk33jpGWCKR9r6_mpYTQ")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAHfUCWnEsX5AX7NhUnCPIlBIZMTgohevaA")
 CHAT_ID = os.getenv("CHAT_ID", "6968612778")
 
 if CHAT_ID:
