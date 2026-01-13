@@ -24,6 +24,8 @@ from telegram import Bot, error as telegram_error
 import threading
 import requests
 
+PORT = int(os.environ.get('PORT', 10000))  # تعريف PORT هنا
+# [باقي الكود كما هو...]
 # ================== FLASK APP ==================
 app = Flask(__name__)
 
@@ -40,7 +42,7 @@ def health():
     return jsonify({"status": "healthy"})
 
 # ================== CONFIG ==================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAHfUCWnEsX5AX7NhUnCPIlBIZMTgohevaA")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAHbG82cYrrLZb3Rk33jpGWCKR9r6_mpYTQ")
 CHAT_ID = os.getenv("CHAT_ID", "6968612778")
 
 if CHAT_ID:
@@ -54,10 +56,13 @@ else:
     exit(1)
 
 VIDEOS_DIR = "videos"
-SEND_INTERVAL = 600  # 10 دقائق = 600 ثانية
+SEND_INTERVAL = int(os.getenv("SEND_INTERVAL", "500"))
 STATE_FILE = "state.json"
 LOG_FILE = "bot.log"
 
+logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
+logger.info(f"🔧 [DEBUG] SEND_INTERVAL = {SEND_INTERVAL}")
+await asyncio.sleep(SEND_INTERVAL)
 # ============================================
 
 # ================== LOGGING ==================
@@ -89,6 +94,8 @@ def save_state(state):
     except Exception as e:
         logger.error(f"خطأ في حفظ state.json: {e}")
 
+# ================== VIDEOS ==================
+# ================== VIDEOS ==================
 # ================== VIDEOS ==================
 def scan_videos():
     try:
@@ -175,41 +182,20 @@ async def send_video(bot, video):
         file_id = message.video.file_id
         logger.info(f"🆔 FILE_ID: {file_id}")
 
-        # =========================
-        # 🔥 هذا السطر المهم لـ n8n
-        # إرسال نفس الفيديو للبوت نفسه
-        # =========================
-        await bot.send_video(
-            chat_id=bot.id,
-            video=file_id,
-            caption=video["caption"]
-        )
-
-        # كل شيء تم بنجاح
-        return True
-
-    except telegram_error.RetryAfter as e:
-        logger.warning(f"⏳ انتظر {e.retry_after} ثانية")
-        await asyncio.sleep(e.retry_after)
-        return False
-
-    except Exception as e:
-        logger.error(f"❌ خطأ في الإرسال: {e}")
-        return False
+    
 
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
     """Function to ping the Render app to keep it awake"""
     while True:
         try:
-            # Get port from environment variable or default to 10000
-            port = int(os.environ.get('PORT', 10000))
-            response = requests.get(f"http://localhost:{port}/health")
+            response = requests.get(f"http://localhost:{PORT}/health")
             logger.info(f"Keep-alive ping response: {response.status_code}")
         except Exception as e:
             logger.error(f"Keep-alive error: {e}")
         time.sleep(250)  # Ping every ~4 minutes
 
+# ================== MAIN LOOP ==================
 # ================== MAIN LOOP ==================
 async def main_loop():
     logger.info("🚀 بدء تشغيل البوت...")
@@ -266,8 +252,7 @@ async def main_loop():
 
 # ================== RUN BOTH FLASK AND BOT ==================
 def run_flask():
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
 def run_keep_alive():
     keep_alive()
@@ -303,4 +288,3 @@ if __name__ == "__main__":
         logger.info("👋 إيقاف البرنامج")
     except Exception as e:
         logger.error(f"❌ خطأ غير متوقع: {e}")
-```
