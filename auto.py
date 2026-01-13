@@ -127,6 +127,7 @@ def scan_videos():
     except Exception as e:
         logger.error(f"خطأ في فحص الفيديوهات: {e}")
         return []
+
 # ================== BOT ==================
 async def init_bot():
     if not BOT_TOKEN:
@@ -147,7 +148,7 @@ async def send_video(bot, video):
         logger.info(f"📤 جاري إرسال: {video['filename']}")
         
         with open(video["path"], "rb") as f:
-            await bot.send_video(
+            message = await bot.send_video(
                 chat_id=CHAT_ID,
                 video=f,
                 caption=video["caption"],
@@ -155,6 +156,18 @@ async def send_video(bot, video):
                 read_timeout=120,
                 write_timeout=120
             )
+        
+        # Forward to channel
+        CHANNEL_ID = "@N8ntestgrhchannell"
+        try:
+            await bot.forward_message(
+                chat_id=CHANNEL_ID,
+                from_chat_id=CHAT_ID,
+                message_id=message.message_id
+            )
+            logger.info(f"✅ تم التوجيه للقناة: {CHANNEL_ID}")
+        except Exception as forward_error:
+            logger.error(f"❌ خطأ في التوجيه للقناة: {forward_error}")
         
         logger.info(f"✅ تم الإرسال: {video['filename']}")
         return True
