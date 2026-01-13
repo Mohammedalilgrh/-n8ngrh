@@ -105,8 +105,8 @@ def scan_videos():
                 if os.path.exists(filepath):
                     # Remove extension from caption
                     caption_without_ext = os.path.splitext(filename)[0]
-                    # Add custom text
-                    final_caption = f"{caption_without_ext}\n\n✅ أو راسلنا واكتب مهتم"
+                    # Use the video name as caption only
+                    final_caption = f"{caption_without_ext}"
                     
                     videos.append({
                         "path": filepath,
@@ -126,7 +126,6 @@ def scan_videos():
     except Exception as e:
         logger.error(f"خطأ في فحص الفيديوهات: {e}")
         return []
-
 # ================== BOT ==================
 async def init_bot():
     if not BOT_TOKEN:
