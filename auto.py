@@ -13,7 +13,7 @@ def install_packages():
 install_packages()
 
 # ثم استمر في باقي imports
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 import os
 import asyncio
 import json
@@ -24,8 +24,6 @@ from telegram import Bot, error as telegram_error
 import threading
 import requests
 
-PORT = int(os.environ.get('PORT', 10000))  # تعريف PORT هنا
-# [باقي الكود كما هو...]
 # ================== FLASK APP ==================
 app = Flask(__name__)
 
@@ -42,7 +40,11 @@ def health():
     return jsonify({"status": "healthy"})
 
 # ================== CONFIG ==================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAFZNuyv5Ua17hnJG4XHdB5JuRwZVCwJPCM")
+# Bot 1 - لإرسال الفيديوهات
+BOT1_TOKEN = os.getenv("BOT1_TOKEN", "8212401543:AAHbG82cYrrLZb3Rk33jpGWCKR9r6_mpYTQ")
+# Bot 2 - لتلقي الفيديوهات من Bot 1 وإرسالها إلى n8n
+BOT2_TOKEN = os.getenv("BOT2_TOKEN", "7970489926:AAGnzN-CGai1kpFs1gGOmykqPE4y7Rv0Bvk")
+
 CHAT_ID = os.getenv("CHAT_ID", "6968612778")
 
 if CHAT_ID:
@@ -56,13 +58,17 @@ else:
     exit(1)
 
 VIDEOS_DIR = "videos"
-SEND_INTERVAL = int(os.getenv("SEND_INTERVAL", "500"))
+# ⚠️ ⚠️ ⚠️ هنا يمكنك تعديل الوقت بين كل فيديو ⚠️ ⚠️ ⚠️
+# القيمة الافتراضية: 600 ثانية = 10 دقائق
+# يمكنك تغييرها إلى:
+# 300 = 5 دقائق
+# 900 = 15 دقيقة
+# 1800 = 30 دقيقة
+# 3600 = ساعة واحدة
+SEND_INTERVAL = int(os.getenv("SEND_INTERVAL", "600"))
 STATE_FILE = "state.json"
 LOG_FILE = "bot.log"
 
-logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
-logger.info(f"🔧 [DEBUG] SEND_INTERVAL = {SEND_INTERVAL}")
-await asyncio.sleep(SEND_INTERVAL)
 # ============================================
 
 # ================== LOGGING ==================
@@ -94,8 +100,6 @@ def save_state(state):
     except Exception as e:
         logger.error(f"خطأ في حفظ state.json: {e}")
 
-# ================== VIDEOS ==================
-# ================== VIDEOS ==================
 # ================== VIDEOS ==================
 def scan_videos():
     try:
@@ -133,13 +137,13 @@ def scan_videos():
         return []
 
 # ================== BOT ==================
-async def init_bot():
-    if not BOT_TOKEN:
+async def init_bot(token):
+    if not token:
         logger.error("❌ BOT_TOKEN غير محدد")
         raise ValueError("BOT_TOKEN غير محدد")
     
     try:
-        bot = Bot(token=BOT_TOKEN)
+        bot = Bot(token=token)
         bot_info = await bot.get_me()
         logger.info(f"✅ Bot متصل: @{bot_info.username}")
         return bot
@@ -147,14 +151,14 @@ async def init_bot():
         logger.error(f"❌ فشل الاتصال بالبوت: {e}")
         raise
 
-async def send_video(bot, video):
+async def send_video(bot1, bot2, video):
     try:
         # =========================
-        # إرسال إلى الخاص
+        # إرسال إلى الخاص باستخدام Bot 1
         # =========================
-        logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
+        logger.info(f"📤 إرسال إلى الخاص باستخدام Bot 1: {video['filename']}")
         with open(video["path"], "rb") as f:
-            await bot.send_video(
+            await bot1.send_video(
                 chat_id=CHAT_ID,
                 video=f,
                 caption=video["caption"],
@@ -167,12 +171,12 @@ async def send_video(bot, video):
         await asyncio.sleep(2)
 
         # =========================
-        # إرسال إلى القناة
+        # إرسال إلى القناة باستخدام Bot 1
         # =========================
         CHANNEL_ID = -1003218943676
-        logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
+        logger.info(f"📤 إرسال إلى القناة باستخدام Bot 1: {video['filename']}")
         with open(video["path"], "rb") as f:
-            message = await bot.send_video(
+            message = await bot1.send_video(
                 chat_id=CHANNEL_ID,
                 video=f,
                 caption=video["caption"],
@@ -182,11 +186,33 @@ async def send_video(bot, video):
         file_id = message.video.file_id
         logger.info(f"🆔 FILE_ID: {file_id}")
 
-    
+        # =========================
+        # 🔥 الجزء المهم: إرسال نفس الفيديو من Bot 1 إلى Bot 2
+        # هذا ما تحتاجه لـ n8n
+        # =========================
+        logger.info(f"🔄 إرسال الفيديو من Bot 1 إلى Bot 2 (لـ n8n)")
+        await bot1.send_video(
+            chat_id=bot2.id,  # إرسال إلى Bot 2
+            video=file_id,
+            caption=video["caption"]
+        )
+
+        # كل شيء تم بنجاح
+        return True
+
+    except telegram_error.RetryAfter as e:
+        logger.warning(f"⏳ انتظر {e.retry_after} ثانية")
+        await asyncio.sleep(e.retry_after)
+        return False
+
+    except Exception as e:
+        logger.error(f"❌ خطأ في الإرسال: {e}")
+        return False
 
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
     """Function to ping the Render app to keep it awake"""
+    PORT = int(os.environ.get('PORT', 10000))
     while True:
         try:
             response = requests.get(f"http://localhost:{PORT}/health")
@@ -196,12 +222,13 @@ def keep_alive():
         time.sleep(250)  # Ping every ~4 minutes
 
 # ================== MAIN LOOP ==================
-# ================== MAIN LOOP ==================
 async def main_loop():
     logger.info("🚀 بدء تشغيل البوت...")
     
     try:
-        bot = await init_bot()
+        # تهيئة كلا البوتين
+        bot1 = await init_bot(BOT1_TOKEN)
+        bot2 = await init_bot(BOT2_TOKEN)
     except:
         return
     
@@ -231,14 +258,14 @@ async def main_loop():
             logger.info(f"🎬 إرسال الفيديو ({next_index+1}/{len(videos)}): {video_to_send['filename']}")
             
             # الإرسال
-            success = await send_video(bot, video_to_send)
+            success = await send_video(bot1, bot2, video_to_send)
             
             if success:
                 logger.info(f"✅ تم إرسال '{video_to_send['filename']}' بنجاح.")
                 state["last_sent_index"] = next_index
                 state["last_sent_time"] = datetime.now().isoformat()
                 save_state(state)
-                logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
+                logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية ({SEND_INTERVAL/60:.1f} دقيقة) للفيديو التالي...")
                 await asyncio.sleep(SEND_INTERVAL) # انتظار طويل عند النجاح
             else:
                 logger.warning(f"⚠️ فشل إرسال '{video_to_send['filename']}'. الانتظار 30 ثانية قبل إعادة المحاولة.")
@@ -252,6 +279,7 @@ async def main_loop():
 
 # ================== RUN BOTH FLASK AND BOT ==================
 def run_flask():
+    PORT = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
 def run_keep_alive():
@@ -264,10 +292,14 @@ if __name__ == "__main__":
     # طباعة معلومات البدء
     print("=" * 50)
     print("🤖 Telegram Video Bot - Advanced Version")
+    print(f"🤖 Bot 1: لإرسال الفيديوهات")
+    print(f"🤖 Bot 2: لتلقي الفيديوهات وإرسالها إلى n8n")
     print(f"👤 Chat ID: {CHAT_ID}")
     print(f"📁 Videos Directory: {os.path.abspath(VIDEOS_DIR)}")
-    print(f"⏰ Interval: {SEND_INTERVAL} seconds")
+    print(f"⏰ Interval: {SEND_INTERVAL} ثانية ({SEND_INTERVAL/60:.1f} دقيقة)")
     print(f"🌐 Port: {PORT}")
+    print("=" * 50)
+    print("⚠️ لتغيير الوقت بين الفيديوهات، عدل قيمة SEND_INTERVAL في السطر 58 ⚠️")
     print("=" * 50)
     
     # Create threads
