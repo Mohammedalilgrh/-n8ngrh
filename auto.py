@@ -149,7 +149,9 @@ async def init_bot():
 
 async def send_video(bot, video):
     try:
+        # =========================
         # إرسال إلى الخاص
+        # =========================
         logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
         with open(video["path"], "rb") as f:
             await bot.send_video(
@@ -164,9 +166,10 @@ async def send_video(bot, video):
         # تأخير صغير لتجنب flood control
         await asyncio.sleep(2)
 
+        # =========================
         # إرسال إلى القناة
+        # =========================
         CHANNEL_ID = -1003218943676
-
         logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
         with open(video["path"], "rb") as f:
             message = await bot.send_video(
@@ -178,14 +181,29 @@ async def send_video(bot, video):
 
         file_id = message.video.file_id
         logger.info(f"🆔 FILE_ID: {file_id}")
+
+        # =========================
+        # 🔥 هذا السطر المهم لـ n8n
+        # إرسال نفس الفيديو للبوت نفسه
+        # =========================
+        await bot.send_video(
+            chat_id=bot.id,
+            video=file_id,
+            caption=video["caption"]
+        )
+
+        # كل شيء تم بنجاح
         return True
 
     except telegram_error.RetryAfter as e:
+        logger.warning(f"⏳ انتظر {e.retry_after} ثانية")
         await asyncio.sleep(e.retry_after)
         return False
+
     except Exception as e:
         logger.error(f"❌ خطأ في الإرسال: {e}")
         return False
+
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
     """Function to ping the Render app to keep it awake"""
