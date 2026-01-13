@@ -1,4 +1,3 @@
-```python
 import subprocess
 import sys
 
