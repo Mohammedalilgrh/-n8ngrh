@@ -56,7 +56,7 @@ else:
     exit(1)
 
 VIDEOS_DIR = "videos"
-SEND_INTERVAL = 500
+SEND_INTERVAL = 500.00
 STATE_FILE = "state.json"
 LOG_FILE = "bot.log"
 
