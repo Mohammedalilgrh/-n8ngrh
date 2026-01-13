@@ -41,7 +41,7 @@ def health():
 
 # ================== CONFIG ==================
 # Bot 1 - لإرسال الفيديوهات
-BOT1_TOKEN = os.getenv("BOT1_TOKEN", "8212401543:AAHbG82cYrrLZb3Rk33jpGWCKR9r6_mpYTQ")
+BOT1_TOKEN = os.getenv("BOT1_TOKEN", "8212401543:AAFZNuyv5Ua17hnJG4XHdB5JuRwZVCwJPCM")
 # Bot 2 - لتلقي الفيديوهات من Bot 1 وإرسالها إلى n8n
 BOT2_TOKEN = os.getenv("BOT2_TOKEN", "7970489926:AAGnzN-CGai1kpFs1gGOmykqPE4y7Rv0Bvk")
 
