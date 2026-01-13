@@ -162,7 +162,8 @@ async def send_video(bot, video):
         await asyncio.sleep(2)
 
         # إرسال إلى القناة
-        CHANNEL_ID = "@N8ntestgrhchannell"
+        CHANNEL_ID = -1003218943676
+
         logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
         with open(video["path"], "rb") as f:
             message = await bot.send_video(
