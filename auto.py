@@ -92,6 +92,7 @@ def save_state(state):
 
 # ================== VIDEOS ==================
 # ================== VIDEOS ==================
+# ================== VIDEOS ==================
 def scan_videos():
     try:
         os.makedirs(VIDEOS_DIR, exist_ok=True)
@@ -105,8 +106,8 @@ def scan_videos():
                 if os.path.exists(filepath):
                     # Remove extension from caption
                     caption_without_ext = os.path.splitext(filename)[0]
-                    # Use the video name as caption only
-                    final_caption = f"{caption_without_ext}"
+                    # Add custom text
+                    final_caption = f"{caption_without_ext}\n\n✅ أو راسلنا واكتب مهتم"
                     
                     videos.append({
                         "path": filepath,
