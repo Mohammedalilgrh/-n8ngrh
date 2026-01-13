@@ -60,8 +60,6 @@ SEND_INTERVAL = 500
 STATE_FILE = "state.json"
 LOG_FILE = "bot.log"
 
-logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
-logger.info(f"🔧 [DEBUG] SEND_INTERVAL = {SEND_INTERVAL}")
 # ============================================
 
 # ================== LOGGING ==================
