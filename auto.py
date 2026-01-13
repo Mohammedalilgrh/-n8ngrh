@@ -24,6 +24,7 @@ from telegram import Bot, error as telegram_error
 import threading
 import requests
 
+PORT = int(os.environ.get('PORT', 10000))  # تعريف PORT هنا
 # [باقي الكود كما هو...]
 # ================== FLASK APP ==================
 app = Flask(__name__)
@@ -107,7 +108,7 @@ def scan_videos():
                     # Remove extension from caption
                     caption_without_ext = os.path.splitext(filename)[0]
                     # Add custom text
-                    final_caption = f"{caption_without_ext}\n\n✅ أو راسلنا واكتب مهتم"
+                    final_caption = caption_without_ext  # فقط اسم الفيديو بدون أي إضافة
                     
                     videos.append({
                         "path": filepath,
@@ -145,10 +146,10 @@ async def init_bot():
 
 async def send_video(bot, video):
     try:
-        logger.info(f"📤 جاري إرسال: {video['filename']}")
-        
+        # إرسال إلى الخاص
+        logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
         with open(video["path"], "rb") as f:
-            message = await bot.send_video(
+            await bot.send_video(
                 chat_id=CHAT_ID,
                 video=f,
                 caption=video["caption"],
@@ -156,14 +157,13 @@ async def send_video(bot, video):
                 read_timeout=120,
                 write_timeout=120
             )
-        
-        # Forward to channel
-      async def send_video(bot, video):
-    try:
+
+        # تأخير صغير لتجنب flood control
+        await asyncio.sleep(2)
+
+        # إرسال إلى القناة
         CHANNEL_ID = "@N8ntestgrhchannell"
-
-        logger.info(f"📤 إرسال مباشر للقناة: {video['filename']}")
-
+        logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
         with open(video["path"], "rb") as f:
             message = await bot.send_video(
                 chat_id=CHANNEL_ID,
@@ -172,10 +172,8 @@ async def send_video(bot, video):
                 supports_streaming=True
             )
 
-        # ✅ هنا تحصل على file_id
         file_id = message.video.file_id
         logger.info(f"🆔 FILE_ID: {file_id}")
-
         return True
 
     except telegram_error.RetryAfter as e:
@@ -184,8 +182,6 @@ async def send_video(bot, video):
     except Exception as e:
         logger.error(f"❌ خطأ في الإرسال: {e}")
         return False
-
-
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
     """Function to ping the Render app to keep it awake"""
