@@ -1,9 +1,20 @@
 import subprocess
 import sys
+import os
+import asyncio
+import json
+import logging
+import time
+from datetime import datetime
+from telegram import Bot, error as telegram_error
+from flask import Flask, jsonify
+import threading
+import requests
+import py7zr
 
-# تثبيت المكتبات تلقائيًا
+# ================== AUTO INSTALL ==================
 def install_packages():
-    packages = ['flask', 'python-telegram-bot', 'requests']
+    packages = ['flask', 'python-telegram-bot', 'requests', 'py7zr']
     for package in packages:
         try:
             __import__(package.replace('-', '_'))
@@ -12,55 +23,21 @@ def install_packages():
 
 install_packages()
 
-# ثم استمر في باقي imports
-from flask import Flask, jsonify, request
-import os
-import asyncio
-import json
-import logging
-import time
-from datetime import datetime
-from telegram import Bot, error as telegram_error
-import threading
-import requests
-
-PORT = int(os.environ.get('PORT', 10000))  # تعريف PORT هنا
-# [باقي الكود كما هو...]
-# ================== FLASK APP ==================
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return jsonify({
-        "status": "running",
-        "message": "Telegram Video Bot is active",
-        "timestamp": datetime.now().isoformat()
-    })
-
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy"})
-
 # ================== CONFIG ==================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAFZNuyv5Ua17hnJG4XHdB5JuRwZVCwJPCM")
-CHAT_ID = os.getenv("CHAT_ID", "6968612778")
-
-if CHAT_ID:
-    try:
-        CHAT_ID = int(CHAT_ID)
-    except ValueError:
-        print(f"❌ CHAT_ID غير صالح: {CHAT_ID}")
-        exit(1)
-else:
-    print("❌ CHAT_ID غير موجود")
-    exit(1)
+BOT_TOKEN = os.getenv("8212401543:AAFZNuyv5Ua17hnJG4XHdB5JuRwZVCwJPCM")
+CHAT_ID = int(os.getenv("CHAT_ID", "6968612778"))
+CHANNEL_ID = -1003218943676
 
 VIDEOS_DIR = "videos"
-SEND_INTERVAL = 300  # 5 دقائق
+ARCHIVE_PATH = os.path.join(VIDEOS_DIR, "videos.7z")
+EXTRACT_DIR = os.path.join(VIDEOS_DIR, "extracted")
+
+SEND_INTERVAL_MINUTES = 5
+SEND_INTERVAL = SEND_INTERVAL_MINUTES * 60
+
 STATE_FILE = "state.json"
 LOG_FILE = "bot.log"
-
-# ============================================
+PORT = int(os.environ.get("PORT", 10000))
 
 # ================== LOGGING ==================
 logging.basicConfig(
@@ -73,211 +50,119 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ================== FLASK ==================
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return jsonify({"status": "running"})
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "healthy"})
+
 # ================== STATE ==================
 def load_state():
     if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            pass
-    return {"last_sent_index": -1, "videos_list": [], "last_sent_time": None}
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"last_sent_index": -1, "videos": []}
 
 def save_state(state):
-    try:
-        state["updated_at"] = datetime.now().isoformat()
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"خطأ في حفظ state.json: {e}")
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
 
-# ================== VIDEOS ==================
-# ================== VIDEOS ==================
-# ================== VIDEOS ==================
+# ================== EXTRACT 7Z ==================
+def extract_7z():
+    if not os.path.exists(ARCHIVE_PATH):
+        logger.warning("📦 ملف videos.7z غير موجود")
+        return
+
+    os.makedirs(EXTRACT_DIR, exist_ok=True)
+
+    if os.listdir(EXTRACT_DIR):
+        return  # مستخرج سابقًا
+
+    logger.info("📦 فك ضغط videos.7z ...")
+    with py7zr.SevenZipFile(ARCHIVE_PATH, mode="r") as z:
+        z.extractall(EXTRACT_DIR)
+
+    logger.info("✅ تم فك الضغط")
+
+# ================== SCAN VIDEOS ==================
 def scan_videos():
-    try:
-        os.makedirs(VIDEOS_DIR, exist_ok=True)
-        
-        video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv']
-        videos = []
-        
-        for filename in os.listdir(VIDEOS_DIR):
-            if any(filename.lower().endswith(ext) for ext in video_extensions):
-                filepath = os.path.join(VIDEOS_DIR, filename)
-                if os.path.exists(filepath):
-                    # Remove extension from caption
-                    caption_without_ext = os.path.splitext(filename)[0]
-                    # Add custom text
-                    final_caption = caption_without_ext  # فقط اسم الفيديو بدون أي إضافة
-                    
-                    videos.append({
-                        "path": filepath,
-                        "filename": filename,
-                        "caption": final_caption[:1000],  # Limit to 1000 chars
-                        "size": os.path.getsize(filepath)
-                    })
-        
-        # ترتيب أبجدي
-        videos.sort(key=lambda x: x["filename"])
-        
-        if videos:
-            total_size = sum(v["size"] for v in videos)
-            logger.info(f"📊 تم العثور على {len(videos)} فيديو ({total_size/1024/1024:.1f} MB)")
-        
-        return videos
-    except Exception as e:
-        logger.error(f"خطأ في فحص الفيديوهات: {e}")
-        return []
+    videos = []
+    for root, _, files in os.walk(EXTRACT_DIR):
+        for file in files:
+            if file.lower().endswith((".mp4", ".mkv", ".mov", ".avi", ".webm")):
+                path = os.path.join(root, file)
+                videos.append({
+                    "path": path,
+                    "filename": file,
+                    "caption": os.path.splitext(file)[0]
+                })
+    videos.sort(key=lambda x: x["filename"])
+    return videos
 
 # ================== BOT ==================
 async def init_bot():
-    if not BOT_TOKEN:
-        logger.error("❌ BOT_TOKEN غير محدد")
-        raise ValueError("BOT_TOKEN غير محدد")
-    
-    try:
-        bot = Bot(token=BOT_TOKEN)
-        bot_info = await bot.get_me()
-        logger.info(f"✅ Bot متصل: @{bot_info.username}")
-        return bot
-    except Exception as e:
-        logger.error(f"❌ فشل الاتصال بالبوت: {e}")
-        raise
+    bot = Bot(token=BOT_TOKEN)
+    me = await bot.get_me()
+    logger.info(f"🤖 Bot @{me.username} متصل")
+    return bot
 
 async def send_video(bot, video):
-    try:
-        # إرسال إلى الخاص
-        logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
-        with open(video["path"], "rb") as f:
-            await bot.send_video(
-                chat_id=CHAT_ID,
-                video=f,
-                caption=video["caption"],
-                supports_streaming=True,
-                read_timeout=120,
-                write_timeout=120
-            )
+    with open(video["path"], "rb") as f:
+        msg = await bot.send_video(
+            chat_id=CHANNEL_ID,
+            video=f,
+            caption=video["caption"],
+            supports_streaming=True
+        )
 
-        # تأخير صغير لتجنب flood control
-        await asyncio.sleep(2)
-
-        # إرسال إلى القناة
-        CHANNEL_ID = -1003218943676
-
-        logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
-        with open(video["path"], "rb") as f:
-            message = await bot.send_video(
-                chat_id=CHANNEL_ID,
-                video=f,
-                caption=video["caption"],
-                supports_streaming=True
-            )
-
-        file_id = message.video.file_id
-        logger.info(f"🆔 FILE_ID: {file_id}")
-        return True
-
-    except telegram_error.RetryAfter as e:
-        await asyncio.sleep(e.retry_after)
-        return False
-    except Exception as e:
-        logger.error(f"❌ خطأ في الإرسال: {e}")
-        return False
-# ================== KEEP ALIVE FUNCTION ==================
-def keep_alive():
-    """Function to ping the Render app to keep it awake"""
-    while True:
-        try:
-            response = requests.get(f"http://localhost:{PORT}/health")
-            logger.info(f"Keep-alive ping response: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Keep-alive error: {e}")
-        time.sleep(250)  # Ping every ~4 minutes
+    logger.info(f"🆔 FILE_ID: {msg.video.file_id}")
+    return True
 
 # ================== MAIN LOOP ==================
 async def main_loop():
-    logger.info("🚀 بدء تشغيل البوت...")
-    
-    try:
-        bot = await init_bot()
-    except:
-        return
-    
+    extract_7z()
+    bot = await init_bot()
+
+    while True:
+        state = load_state()
+        videos = scan_videos()
+
+        if not videos:
+            logger.info("📭 لا توجد فيديوهات")
+            await asyncio.sleep(60)
+            continue
+
+        idx = (state["last_sent_index"] + 1) % len(videos)
+        video = videos[idx]
+
+        logger.info(f"🎬 إرسال: {video['filename']}")
+
+        if await send_video(bot, video):
+            state["last_sent_index"] = idx
+            save_state(state)
+
+        logger.info(f"⏳ انتظار {SEND_INTERVAL_MINUTES} دقائق")
+        await asyncio.sleep(SEND_INTERVAL)
+
+# ================== KEEP ALIVE ==================
+def keep_alive():
     while True:
         try:
-            state = load_state()
-            videos = scan_videos()
-            
-            if not videos:
-                logger.info("📭 لا توجد فيديوهات في المجلد")
-                logger.info(f"📂 ضع الفيديوهات في: {os.path.abspath(VIDEOS_DIR)}")
-                await asyncio.sleep(60)
-                continue
-            
-            # تحديث القائمة إذا تغيرت
-            current_list = [v["filename"] for v in videos]
-            if state["videos_list"] != current_list:
-                logger.info(f"🔄 تم تحديث القائمة: {len(videos)} فيديو")
-                state["videos_list"] = current_list
-                state["last_sent_index"] = -1
-                save_state(state)
-            
-            # الفيديو التالي
-            next_index = (state.get("last_sent_index", -1) + 1) % len(videos)
-            video_to_send = videos[next_index]
-            
-            logger.info(f"🎬 إرسال الفيديو ({next_index+1}/{len(videos)}): {video_to_send['filename']}")
-            
-            # الإرسال
-            if await send_video(bot, video_to_send):
-                state["last_sent_index"] = next_index
-                state["last_sent_time"] = datetime.now().isoformat()
-                save_state(state)
-            
-            logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
-            await asyncio.sleep(SEND_INTERVAL)
-            
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            logger.error(f"❌ خطأ في الحلقة الرئيسية: {e}")
-            await asyncio.sleep(30)
+            requests.get(f"http://localhost:{PORT}/health")
+        except:
+            pass
+        time.sleep(240)
 
-# ================== RUN BOTH FLASK AND BOT ==================
+# ================== RUN ==================
 def run_flask():
-    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
-
-def run_keep_alive():
-    keep_alive()
+    app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
-    # Get port from environment variable or default to 10000
-    PORT = int(os.environ.get('PORT', 10000))
-    
-    # طباعة معلومات البدء
-    print("=" * 50)
-    print("🤖 Telegram Video Bot - Advanced Version")
-    print(f"👤 Chat ID: {CHAT_ID}")
-    print(f"📁 Videos Directory: {os.path.abspath(VIDEOS_DIR)}")
-    print(f"⏰ Interval: {SEND_INTERVAL} seconds")
-    print(f"🌐 Port: {PORT}")
-    print("=" * 50)
-    
-    # Create threads
-    flask_thread = threading.Thread(target=run_flask)
-    keep_alive_thread = threading.Thread(target=run_keep_alive)
-    
-    # Start threads
-    flask_thread.daemon = True
-    keep_alive_thread.daemon = True
-    
-    flask_thread.start()
-    keep_alive_thread.start()
-    
-    # Run the main loop
-    try:
-        asyncio.run(main_loop())
-    except KeyboardInterrupt:
-        logger.info("👋 إيقاف البرنامج")
-    except Exception as e:
-        logger.error(f"❌ خطأ غير متوقع: {e}")
+    threading.Thread(target=run_flask, daemon=True).start()
+    threading.Thread(target=keep_alive, daemon=True).start()
+    asyncio.run(main_loop())
