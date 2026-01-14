@@ -161,10 +161,18 @@ async def send_video(bot, video):
         # تأخير صغير لتجنب flood control
         await asyncio.sleep(2)
 
-        
-       # file id =============================================
-        #==========================================================
-        
+        # إرسال إلى القناة
+        CHANNEL_ID = -1003218943676
+
+        logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
+        with open(video["path"], "rb") as f:
+            message = await bot.send_video(
+                chat_id=CHANNEL_ID,
+                video=f,
+                caption=video["caption"],
+                supports_streaming=True
+            )
+
         file_id = message.video.file_id
         logger.info(f"🆔 FILE_ID: {file_id}")
         return True
