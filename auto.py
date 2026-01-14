@@ -185,7 +185,7 @@ async def send_video(bot, video):
         logger.info("🤖 إرسال الفيديو إلى البوت نفسه (n8n)")
 
         await bot.send_video(
-            chat_id=bot.id,          # ← البوت نفسه (8212401543)
+            chat_id=6968612778,          # ← البوت نفسه (8212401543)
             video=file_id,           # ← نستخدم file_id (أسرع وأضمن)
             caption=video["caption"],
             supports_streaming=True
