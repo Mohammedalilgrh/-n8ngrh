@@ -24,8 +24,6 @@ from telegram import Bot, error as telegram_error
 import threading
 import requests
 
-PORT = int(os.environ.get('PORT', 10000))  # تعريف PORT هنا
-# [باقي الكود كما هو...]
 # ================== FLASK APP ==================
 app = Flask(__name__)
 
@@ -54,6 +52,9 @@ if CHAT_ID:
 else:
     print("❌ CHAT_ID غير موجود")
     exit(1)
+
+# إعدادات القناة - القناة المراد إرسال الفيديو إليها
+CHANNEL_ID = -1003218943676  # ID القناة
 
 VIDEOS_DIR = "videos"
 SEND_INTERVAL = 300  # 5 دقائق
@@ -91,8 +92,6 @@ def save_state(state):
     except Exception as e:
         logger.error(f"خطأ في حفظ state.json: {e}")
 
-# ================== VIDEOS ==================
-# ================== VIDEOS ==================
 # ================== VIDEOS ==================
 def scan_videos():
     try:
@@ -147,51 +146,62 @@ async def init_bot():
 async def send_video(bot, video):
     try:
         # =========================
-        # 1️⃣ إرسال إلى الخاص
+        # 1️⃣ إرسال إلى الخاص (للمستخدم CHAT_ID)
         # =========================
-        logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
-        with open(video["path"], "rb") as f:
-            await bot.send_video(
-                chat_id=CHAT_ID,
-                video=f,
-                caption=video["caption"],
-                supports_streaming=True
-            )
-
+        logger.info(f"📤 إرسال إلى الخاص (المستخدم): {video['filename']}")
+        try:
+            with open(video["path"], "rb") as f:
+                await bot.send_video(
+                    chat_id=CHAT_ID,
+                    video=f,
+                    caption=video["caption"],
+                    supports_streaming=True
+                )
+            logger.info("✅ تم الإرسال إلى المستخدم بنجاح")
+        except Exception as e:
+            logger.warning(f"⚠️ فشل الإرسال إلى المستخدم: {e}")
+        
         await asyncio.sleep(2)
 
         # =========================
         # 2️⃣ إرسال إلى القناة
         # =========================
-        CHANNEL_ID = -1003218943676
-
         logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
-        with open(video["path"], "rb") as f:
-            channel_message = await bot.send_video(
-                chat_id=CHANNEL_ID,
-                video=f,
-                caption=video["caption"],
-                supports_streaming=True
-            )
-
-        file_id = channel_message.video.file_id
-        logger.info(f"🆔 FILE_ID من القناة: {file_id}")
-
+        try:
+            with open(video["path"], "rb") as f:
+                channel_message = await bot.send_video(
+                    chat_id=CHANNEL_ID,
+                    video=f,
+                    caption=video["caption"],
+                    supports_streaming=True
+                )
+            
+            # الحصول على file_id من الرسالة التي أرسلت للقناة
+            file_id = channel_message.video.file_id
+            logger.info(f"🆔 FILE_ID من القناة: {file_id}")
+        except Exception as e:
+            logger.error(f"❌ فشل إرسال الفيديو إلى القناة: {e}")
+            return False
+        
         await asyncio.sleep(2)
 
         # =========================
-        # 🔥 3️⃣ إرسال إلى البوت نفسه (هذا المهم لـ n8n)
+        # 3️⃣ إرسال إلى البوت نفسه (لنقاط n8n)
         # =========================
-        logger.info("🤖 إرسال الفيديو إلى البوت نفسه (n8n)")
-
-        await bot.send_video(
-            chat_id=6968612778,          # ← البوت نفسه (8212401543)
-            video=file_id,           # ← نستخدم file_id (أسرع وأضمن)
-            caption=video["caption"],
-            supports_streaming=True
-        )
-
-        logger.info("✅ تم إرسال الفيديو للبوت نفسه بنجاح")
+        logger.info("🤖 إرسال الفيديو إلى البوت نفسه (للنقاط n8n)")
+        try:
+            # أرسل الفيديو باستخدام file_id (أسرع وأكثر كفاءة)
+            await bot.send_video(
+                chat_id=CHAT_ID,          # ← هنا نرسل إلى البوت نفسه باستخدام CHAT_ID
+                video=file_id,            # ← نستخدم file_id الذي حصلنا عليه من القناة
+                caption=video["caption"],
+                supports_streaming=True
+            )
+            logger.info("✅ تم إرسال الفيديو للبوت نفسه بنجاح (للنقاط n8n)")
+        except Exception as e:
+            logger.error(f"❌ فشل إرسال الفيديو للبوت نفسه: {e}")
+            return False
+        
         return True
 
     except telegram_error.RetryAfter as e:
@@ -206,6 +216,12 @@ async def send_video(bot, video):
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
     """Function to ping the Render app to keep it awake"""
+    # انتظر قليلاً حتى يبدأ Flask
+    time.sleep(5)
+    
+    # احصل على الـ PORT من المتغيرات البيئية
+    PORT = int(os.environ.get('PORT', 10000))
+    
     while True:
         try:
             response = requests.get(f"http://localhost:{PORT}/health")
@@ -247,12 +263,16 @@ async def main_loop():
             video_to_send = videos[next_index]
             
             logger.info(f"🎬 إرسال الفيديو ({next_index+1}/{len(videos)}): {video_to_send['filename']}")
+            logger.info(f"📝 العنوان: {video_to_send['caption']}")
             
             # الإرسال
             if await send_video(bot, video_to_send):
                 state["last_sent_index"] = next_index
                 state["last_sent_time"] = datetime.now().isoformat()
                 save_state(state)
+                logger.info(f"✅ تم إكمال دورة الإرسال بنجاح للفيديو: {video_to_send['filename']}")
+            else:
+                logger.error(f"❌ فشل إرسال الفيديو: {video_to_send['filename']}")
             
             logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
             await asyncio.sleep(SEND_INTERVAL)
@@ -265,36 +285,43 @@ async def main_loop():
 
 # ================== RUN BOTH FLASK AND BOT ==================
 def run_flask():
+    # احصل على الـ PORT من المتغيرات البيئية
+    PORT = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
-def run_keep_alive():
-    keep_alive()
-
 if __name__ == "__main__":
-    # Get port from environment variable or default to 10000
+    # احصل على الـ PORT من المتغيرات البيئية
     PORT = int(os.environ.get('PORT', 10000))
     
     # طباعة معلومات البدء
     print("=" * 50)
     print("🤖 Telegram Video Bot - Advanced Version")
+    print(f"🤖 Bot ID: 8212401543")
     print(f"👤 Chat ID: {CHAT_ID}")
+    print(f"📺 Channel ID: {CHANNEL_ID}")
     print(f"📁 Videos Directory: {os.path.abspath(VIDEOS_DIR)}")
     print(f"⏰ Interval: {SEND_INTERVAL} seconds")
     print(f"🌐 Port: {PORT}")
     print("=" * 50)
     
-    # Create threads
-    flask_thread = threading.Thread(target=run_flask)
-    keep_alive_thread = threading.Thread(target=run_keep_alive)
+    # التحقق من وجود مجلد الفيديوهات
+    if not os.path.exists(VIDEOS_DIR):
+        os.makedirs(VIDEOS_DIR, exist_ok=True)
+        print(f"📁 تم إنشاء مجلد الفيديوهات: {VIDEOS_DIR}")
     
-    # Start threads
+    # إنشاء threads
+    flask_thread = threading.Thread(target=run_flask)
+    keep_alive_thread = threading.Thread(target=keep_alive)
+    
+    # تعيين كـ daemon threads
     flask_thread.daemon = True
     keep_alive_thread.daemon = True
     
+    # بدء threads
     flask_thread.start()
     keep_alive_thread.start()
     
-    # Run the main loop
+    # تشغيل الحلقة الرئيسية
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
