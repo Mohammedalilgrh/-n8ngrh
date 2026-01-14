@@ -146,43 +146,63 @@ async def init_bot():
 
 async def send_video(bot, video):
     try:
-        # إرسال إلى الخاص
+        # =========================
+        # 1️⃣ إرسال إلى الخاص
+        # =========================
         logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
         with open(video["path"], "rb") as f:
             await bot.send_video(
                 chat_id=CHAT_ID,
                 video=f,
                 caption=video["caption"],
-                supports_streaming=True,
-                read_timeout=120,
-                write_timeout=120
+                supports_streaming=True
             )
 
-        # تأخير صغير لتجنب flood control
         await asyncio.sleep(2)
 
-        # إرسال إلى القناة
+        # =========================
+        # 2️⃣ إرسال إلى القناة
+        # =========================
         CHANNEL_ID = -1003218943676
 
         logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
         with open(video["path"], "rb") as f:
-            message = await bot.send_video(
+            channel_message = await bot.send_video(
                 chat_id=CHANNEL_ID,
                 video=f,
                 caption=video["caption"],
                 supports_streaming=True
             )
 
-        file_id = message.video.file_id
-        logger.info(f"🆔 FILE_ID: {file_id}")
+        file_id = channel_message.video.file_id
+        logger.info(f"🆔 FILE_ID من القناة: {file_id}")
+
+        await asyncio.sleep(2)
+
+        # =========================
+        # 🔥 3️⃣ إرسال إلى البوت نفسه (هذا المهم لـ n8n)
+        # =========================
+        logger.info("🤖 إرسال الفيديو إلى البوت نفسه (n8n)")
+
+        await bot.send_video(
+            chat_id=bot.id,          # ← البوت نفسه (8212401543)
+            video=file_id,           # ← نستخدم file_id (أسرع وأضمن)
+            caption=video["caption"],
+            supports_streaming=True
+        )
+
+        logger.info("✅ تم إرسال الفيديو للبوت نفسه بنجاح")
         return True
 
     except telegram_error.RetryAfter as e:
+        logger.warning(f"⏳ Flood control، انتظار {e.retry_after} ثانية")
         await asyncio.sleep(e.retry_after)
         return False
+
     except Exception as e:
         logger.error(f"❌ خطأ في الإرسال: {e}")
         return False
+
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
     """Function to ping the Render app to keep it awake"""
