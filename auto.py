@@ -20,13 +20,12 @@ import json
 import logging
 import time
 from datetime import datetime
-from telegram import Bot, Update, error as telegram_error
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Bot, error as telegram_error
 import threading
 import requests
 
 PORT = int(os.environ.get('PORT', 10000))  # تعريف PORT هنا
-
+# [باقي الكود كما هو...]
 # ================== FLASK APP ==================
 app = Flask(__name__)
 
@@ -34,7 +33,7 @@ app = Flask(__name__)
 def home():
     return jsonify({
         "status": "running",
-        "message": "Telegram Listener Bot is active",
+        "message": "Telegram Video Bot is active",
         "timestamp": datetime.now().isoformat()
     })
 
@@ -43,8 +42,8 @@ def health():
     return jsonify({"status": "healthy"})
 
 # ================== CONFIG ==================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "7970489926:AAGnzN-CGai1kpFs1gGOmykqPE4y7Rv0Bvk")
-CHAT_ID = os.getenv("CHAT_ID", "-1003218943676")  # تأكد من تعيينه إلى معرف القناة
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAFZNuyv5Ua17hnJG4XHdB5JuRwZVCwJPCM")
+CHAT_ID = os.getenv("CHAT_ID", "6968612778")
 
 if CHAT_ID:
     try:
@@ -56,7 +55,10 @@ else:
     print("❌ CHAT_ID غير موجود")
     exit(1)
 
-LOG_FILE = "listener_bot.log"
+VIDEOS_DIR = "videos"
+SEND_INTERVAL = 300  # 5 دقائق
+STATE_FILE = "state.json"
+LOG_FILE = "bot.log"
 
 # ============================================
 
@@ -71,27 +73,116 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ================== HANDLERS ==================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أهلا بك! أنا مستعد لأستقبال الفيديوهات والكابشنة من القناة.")
+# ================== STATE ==================
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"last_sent_index": -1, "videos_list": [], "last_sent_time": None}
 
-async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def save_state(state):
     try:
-        video = update.message.video
-        caption = update.message.caption if update.message.caption else "بدون كابشن"
-        file_id = video.file_id
-        
-        logger.info(f"📥 استلمت فيديو: {video.file_name} مع كابشن: {caption}")
-        logger.info(f"🆔 FILE_ID: {file_id}")
-
-        # إرسال رسالة تأكيد إلى حسابك الخاص (اختياري)
-        OWNER_CHAT_ID = 6968612778  # معرف حسابك الخاص
-        confirmation_message = f"📥 استلمت فيديو:\n{caption}\nFILE_ID: {file_id}"
-        await context.bot.send_message(chat_id=OWNER_CHAT_ID, text=confirmation_message)
-
+        state["updated_at"] = datetime.now().isoformat()
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logger.error(f"❌ خطأ في معالجة الفيديو: {e}")
+        logger.error(f"خطأ في حفظ state.json: {e}")
 
+# ================== VIDEOS ==================
+# ================== VIDEOS ==================
+# ================== VIDEOS ==================
+def scan_videos():
+    try:
+        os.makedirs(VIDEOS_DIR, exist_ok=True)
+        
+        video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv']
+        videos = []
+        
+        for filename in os.listdir(VIDEOS_DIR):
+            if any(filename.lower().endswith(ext) for ext in video_extensions):
+                filepath = os.path.join(VIDEOS_DIR, filename)
+                if os.path.exists(filepath):
+                    # Remove extension from caption
+                    caption_without_ext = os.path.splitext(filename)[0]
+                    # Add custom text
+                    final_caption = caption_without_ext  # فقط اسم الفيديو بدون أي إضافة
+                    
+                    videos.append({
+                        "path": filepath,
+                        "filename": filename,
+                        "caption": final_caption[:1000],  # Limit to 1000 chars
+                        "size": os.path.getsize(filepath)
+                    })
+        
+        # ترتيب أبجدي
+        videos.sort(key=lambda x: x["filename"])
+        
+        if videos:
+            total_size = sum(v["size"] for v in videos)
+            logger.info(f"📊 تم العثور على {len(videos)} فيديو ({total_size/1024/1024:.1f} MB)")
+        
+        return videos
+    except Exception as e:
+        logger.error(f"خطأ في فحص الفيديوهات: {e}")
+        return []
+
+# ================== BOT ==================
+async def init_bot():
+    if not BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN غير محدد")
+        raise ValueError("BOT_TOKEN غير محدد")
+    
+    try:
+        bot = Bot(token=BOT_TOKEN)
+        bot_info = await bot.get_me()
+        logger.info(f"✅ Bot متصل: @{bot_info.username}")
+        return bot
+    except Exception as e:
+        logger.error(f"❌ فشل الاتصال بالبوت: {e}")
+        raise
+
+async def send_video(bot, video):
+    try:
+        # إرسال إلى الخاص
+        logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
+        with open(video["path"], "rb") as f:
+            await bot.send_video(
+                chat_id=CHAT_ID,
+                video=f,
+                caption=video["caption"],
+                supports_streaming=True,
+                read_timeout=120,
+                write_timeout=120
+            )
+
+        # تأخير صغير لتجنب flood control
+        await asyncio.sleep(2)
+
+        # إرسال إلى القناة
+        CHANNEL_ID = -1003218943676
+
+        logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
+        with open(video["path"], "rb") as f:
+            message = await bot.send_video(
+                chat_id=CHANNEL_ID,
+                video=f,
+                caption=video["caption"],
+                supports_streaming=True
+            )
+
+        file_id = message.video.file_id
+        logger.info(f"🆔 FILE_ID: {file_id}")
+        return True
+
+    except telegram_error.RetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        return False
+    except Exception as e:
+        logger.error(f"❌ خطأ في الإرسال: {e}")
+        return False
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
     """Function to ping the Render app to keep it awake"""
@@ -103,20 +194,54 @@ def keep_alive():
             logger.error(f"Keep-alive error: {e}")
         time.sleep(250)  # Ping every ~4 minutes
 
-# ================== MAIN ==================
-def main():
-    logger.info("🚀 بدء تشغيل البوت الاستماعي...")
+# ================== MAIN LOOP ==================
+async def main_loop():
+    logger.info("🚀 بدء تشغيل البوت...")
     
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    try:
+        bot = await init_bot()
+    except:
+        return
     
-    start_handler = CommandHandler('start', start)
-    video_handler = MessageHandler(filters.VIDEO, handle_video)
-    
-    application.add_handler(start_handler)
-    application.add_handler(video_handler)
-    
-    # Run the bot
-    application.run_polling()
+    while True:
+        try:
+            state = load_state()
+            videos = scan_videos()
+            
+            if not videos:
+                logger.info("📭 لا توجد فيديوهات في المجلد")
+                logger.info(f"📂 ضع الفيديوهات في: {os.path.abspath(VIDEOS_DIR)}")
+                await asyncio.sleep(60)
+                continue
+            
+            # تحديث القائمة إذا تغيرت
+            current_list = [v["filename"] for v in videos]
+            if state["videos_list"] != current_list:
+                logger.info(f"🔄 تم تحديث القائمة: {len(videos)} فيديو")
+                state["videos_list"] = current_list
+                state["last_sent_index"] = -1
+                save_state(state)
+            
+            # الفيديو التالي
+            next_index = (state.get("last_sent_index", -1) + 1) % len(videos)
+            video_to_send = videos[next_index]
+            
+            logger.info(f"🎬 إرسال الفيديو ({next_index+1}/{len(videos)}): {video_to_send['filename']}")
+            
+            # الإرسال
+            if await send_video(bot, video_to_send):
+                state["last_sent_index"] = next_index
+                state["last_sent_time"] = datetime.now().isoformat()
+                save_state(state)
+            
+            logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
+            await asyncio.sleep(SEND_INTERVAL)
+            
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            logger.error(f"❌ خطأ في الحلقة الرئيسية: {e}")
+            await asyncio.sleep(30)
 
 # ================== RUN BOTH FLASK AND BOT ==================
 def run_flask():
@@ -131,29 +256,27 @@ if __name__ == "__main__":
     
     # طباعة معلومات البدء
     print("=" * 50)
-    print("🤖 Telegram Listener Bot - Advanced Version")
+    print("🤖 Telegram Video Bot - Advanced Version")
     print(f"👤 Chat ID: {CHAT_ID}")
+    print(f"📁 Videos Directory: {os.path.abspath(VIDEOS_DIR)}")
+    print(f"⏰ Interval: {SEND_INTERVAL} seconds")
     print(f"🌐 Port: {PORT}")
     print("=" * 50)
     
     # Create threads
     flask_thread = threading.Thread(target=run_flask)
     keep_alive_thread = threading.Thread(target=run_keep_alive)
-    bot_thread = threading.Thread(target=main)
     
     # Start threads
     flask_thread.daemon = True
     keep_alive_thread.daemon = True
-    bot_thread.daemon = True
     
     flask_thread.start()
     keep_alive_thread.start()
-    bot_thread.start()
     
-    # Keep the main thread alive
+    # Run the main loop
     try:
-        while True:
-            time.sleep(3600)  # Sleep indefinitely
+        asyncio.run(main_loop())
     except KeyboardInterrupt:
         logger.info("👋 إيقاف البرنامج")
     except Exception as e:
