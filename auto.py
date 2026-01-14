@@ -25,7 +25,7 @@ import threading
 import requests
 
 PORT = int(os.environ.get('PORT', 10000))  # تعريف PORT هنا
-# [باقي الكود كما هو...]
+
 # ================== FLASK APP ==================
 app = Flask(__name__)
 
@@ -43,7 +43,7 @@ def health():
 
 # ================== CONFIG ==================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAFZNuyv5Ua17hnJG4XHdB5JuRwZVCwJPCM")
-CHAT_ID = os.getenv("CHAT_ID", "6968612778")
+CHAT_ID = os.getenv("CHAT_ID", "-1003545338699")  # تأكد من تعيينه إلى معرف المجموعة
 
 if CHAT_ID:
     try:
@@ -91,8 +91,6 @@ def save_state(state):
     except Exception as e:
         logger.error(f"خطأ في حفظ state.json: {e}")
 
-# ================== VIDEOS ==================
-# ================== VIDEOS ==================
 # ================== VIDEOS ==================
 def scan_videos():
     try:
@@ -146,10 +144,10 @@ async def init_bot():
 
 async def send_video(bot, video):
     try:
-        # إرسال إلى الخاص
-        logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
+        # إرسال إلى المجموعة
+        logger.info(f"📤 إرسال إلى المجموعة: {video['filename']}")
         with open(video["path"], "rb") as f:
-            await bot.send_video(
+            message = await bot.send_video(
                 chat_id=CHAT_ID,
                 video=f,
                 caption=video["caption"],
@@ -158,23 +156,14 @@ async def send_video(bot, video):
                 write_timeout=120
             )
 
-        # تأخير صغير لتجنب flood control
-        await asyncio.sleep(2)
-
-        # إرسال إلى القناة
-        CHANNEL_ID = -1003218943676
-
-        logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
-        with open(video["path"], "rb") as f:
-            message = await bot.send_video(
-                chat_id=CHANNEL_ID,
-                video=f,
-                caption=video["caption"],
-                supports_streaming=True
-            )
-
         file_id = message.video.file_id
         logger.info(f"🆔 FILE_ID: {file_id}")
+
+        # إرسال رسالة تأكيد إلى حسابك الخاص (اختياري)
+        OWNER_CHAT_ID = 6968612778  # معرف حسابك الخاص
+        confirmation_message = f"✅ نُشر الفيديو:\n{video['caption']}\nفي المجموعة!"
+        await bot.send_message(chat_id=OWNER_CHAT_ID, text=confirmation_message)
+
         return True
 
     except telegram_error.RetryAfter as e:
@@ -183,6 +172,7 @@ async def send_video(bot, video):
     except Exception as e:
         logger.error(f"❌ خطأ في الإرسال: {e}")
         return False
+
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
     """Function to ping the Render app to keep it awake"""
