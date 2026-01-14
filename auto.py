@@ -1,314 +1,131 @@
-import subprocess
-import sys
-
-# تثبيت المكتبات تلقائيًا (للتشغيل الأول فقط)
-def install_packages():
-    packages = ['flask', 'python-telegram-bot', 'requests', 'python-dotenv']
-    for package in packages:
-        try:
-            __import__(package.replace('-', '_'))
-        except ImportError:
-            print(f"📦 تثبيت: {package}")
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', package], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-install_packages()
-
-# =============== الاستيرادات بعد التثبيت ===============
 import os
-import json
 import time
-import threading
-import asyncio
-import logging
-from datetime import datetime
-from flask import Flask, request, jsonify
-from telegram import Bot, Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+import json
 import requests
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import schedule
+import base64
+import pickle
 
-# =============== الإعدادات ===============
-PORT = int(os.environ.get("PORT", 10000))
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAFZNuyv5Ua17hnJG4XHdB5JuRwZVCwJPCM")
-CHAT_ID = int(os.getenv("CHAT_ID", "6968612778"))  # الخاص
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003218943676"))  # القناة
-SELF_CHAT_ID = 6968612778  # ← نفس البوت (لإرسال الميديا إليه لاستقباله في n8n)
+# Constants
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
+GOOGLE_DRIVE_FOLDER_ID = '10Hk6ZQaDiXuHe-k8J9_Rc11UeQ7iTE14'
+INSTAGRAM_ACCOUNT_ID = '61219445676'
+INSTAGRAM_GRAPH_API_TOKEN = 'EAAaoHv9aJ5gBQTq7k7V019hwK5eybC3ZCrrErXsAZBUZC3pTGk2JDxJPSlUoJfVR0nDLtFfdmixZAZAodls8a80kXuBDuxJ1RZCfEKp8QB6qrKFgskF4ewuuVG4LzRD6lfrYrLlpt4liOEqe91bRWxwA7z482zewY8TbOyH3CnwtSuUWtXYnxsLNWk344nQ8zEix7WI1Tja3tWxTzboZAMTZCSusiSOwdJni3HctIVkZD'
 
-VIDEOS_DIR = "videos"
-SEND_INTERVAL = 300  # 5 دقائق
-STATE_FILE = "state.json"
-LOG_FILE = "bot.log"
+# Google Drive Client Credentials
+GOOGLE_CLIENT_ID = '468168778821-mr3jp6kj5ssomi8vc25q9h8pc05egtqe.apps.googleusercontent.com'
+GOOGLE_CLIENT_SECRET = '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'
+GOOGLE_REDIRECT_URI = 'urn:ietf:wg:oauth:2.0:oob'
 
-# =============== التهيئة ===============
-os.makedirs(VIDEOS_DIR, exist_ok=True)
-
-# =============== اللوغينغ ===============
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# =============== Flask App ===============
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return jsonify({
-        "status": "running",
-        "service": "Telegram Video Relay Bot",
-        "webhook_ready": True,
-        "timestamp": datetime.now().isoformat()
-    })
-
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy", "uptime": time.time() - START_TIME})
-
-# 🔥 Webhook لـ n8n — هذا هو المفتاح!
-@app.route('/webhook', methods=['POST'])
-def telegram_webhook():
-    """يُفعّل عند وصول أي رسالة/فيديو إلى البوت (مثل من القناة أو من إرسال ذاتي)"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data"}), 400
-
-        # استخراج البيانات الأساسية
-        message = data.get("message", {})
-        video = message.get("video", {})
-        caption = message.get("caption", "")
-        chat = message.get("chat", {})
-        message_id = message.get("message_id")
-        date = message.get("date")
-
-        # إذا كان فيه فيديو
-        if video:
-            file_id = video.get("file_id")
-            file_unique_id = video.get("file_unique_id")
-            width = video.get("width")
-            height = video.get("height")
-            duration = video.get("duration")
-            file_size = video.get("file_size")
-
-            # ⚡ طلب رابط الملف الفعلي (اختياري — مفيد لـ n8n)
-            file_url = None
-            try:
-                get_file_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={file_id}"
-                resp = requests.get(get_file_url).json()
-                if resp.get("ok"):
-                    file_path = resp["result"]["file_path"]
-                    file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-            except Exception as e:
-                logger.warning(f"⚠️ فشل جلب file_url: {e}")
-
-            # ✅ إرجاع كل البيانات المهمة لـ n8n
-            payload = {
-                "type": "video",
-                "file_id": file_id,
-                "file_unique_id": file_unique_id,
-                "caption": caption,
-                "chat_id": chat.get("id"),
-                "chat_type": chat.get("type"),
-                "chat_title": chat.get("title") or chat.get("username"),
-                "message_id": message_id,
-                "date": datetime.fromtimestamp(date).isoformat() if date else None,
-                "video": {
-                    "width": width,
-                    "height": height,
-                    "duration": duration,
-                    "file_size": file_size,
-                    "file_url": file_url  # ← مهم جدًا لاستخدامه في Social Media Nodes
-                },
-                "raw_update": data  # ← لمن تحتاج الـ full payload
-            }
-
-            logger.info(f"📤 Webhook triggered | Video: {file_id[:10]}... | Caption: {caption[:30]}")
-            return jsonify(payload), 200
-
-        # إذا لم يكن فيديو (مثلاً نص أو صورة)
+# Load or refresh Google Drive credentials
+def get_google_drive_credentials():
+    creds = None
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
         else:
-            payload = {
-                "type": "other",
-                "chat_id": chat.get("id"),
-                "message_id": message_id,
-                "text": message.get("text", ""),
-                "caption": caption,
-                "date": datetime.fromtimestamp(date).isoformat() if date else None,
-                "raw_update": data
-            }
-            logger.info(f"📤 Webhook (non-video): {payload['text'][:50]}...")
-            return jsonify(payload), 200
-
-    except Exception as e:
-        logger.error(f"❌ Webhook error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-# =============== دوال المساعدة ===============
-def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"❌ فشل تحميل الحالة: {e}")
-    return {"last_sent_index": -1, "videos_list": [], "last_sent_time": None}
-
-def save_state(state):
-    try:
-        state["updated_at"] = datetime.now().isoformat()
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"❌ فشل حفظ الحالة: {e}")
-
-def scan_videos():
-    video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv'}
-    videos = []
-    try:
-        for filename in os.listdir(VIDEOS_DIR):
-            if any(filename.lower().endswith(ext) for ext in video_extensions):
-                filepath = os.path.join(VIDEOS_DIR, filename)
-                if os.path.isfile(filepath):
-                    caption = os.path.splitext(filename)[0]  # بدون امتداد
-                    videos.append({
-                        "path": filepath,
-                        "filename": filename,
-                        "caption": caption[:1000],
-                        "size": os.path.getsize(filepath)
-                    })
-        videos.sort(key=lambda x: x["filename"])
-        total_mb = sum(v["size"] for v in videos) / (1024 * 1024)
-        logger.info(f"📁 {len(videos)} فيديو جاهز ({total_mb:.1f} MB)")
-        return videos
-    except Exception as e:
-        logger.error(f"❌ خطأ في فحص الفيديوهات: {e}")
-        return []
-
-# =============== إرسال الفيديو (إلى الخاص ← القناة ← البوت نفسه) ===============
-async def send_video_cycle(bot, video):
-    try:
-        # 1️⃣ إرسال إلى الخاص
-        logger.info(f"📤 [1/3] إرسال إلى الخاص: {video['filename']}")
-        with open(video["path"], "rb") as f:
-            await bot.send_video(
-                chat_id=CHAT_ID,
-                video=f,
-                caption=video["caption"],
-                supports_streaming=True
+            flow = InstalledAppFlow.from_client_config(
+                {
+                    "installed": {
+                        "client_id": GOOGLE_CLIENT_ID,
+                        "project_id": "your-project-id",
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                        "client_secret": GOOGLE_CLIENT_SECRET,
+                        "redirect_uris": [GOOGLE_REDIRECT_URI]
+                    }
+                },
+                SCOPES
             )
-        await asyncio.sleep(1)
+            creds = flow.run_console()
+        with open('token.pickle', 'wb') as token:
+            pickle.dump(creds, token)
+    return creds
 
-        # 2️⃣ إرسال إلى القناة
-        logger.info(f"📤 [2/3] إرسال إلى القناة: {video['filename']}")
-        with open(video["path"], "rb") as f:
-            msg = await bot.send_video(
-                chat_id=CHANNEL_ID,
-                video=f,
-                caption=video["caption"],
-                supports_streaming=True
-            )
-        file_id = msg.video.file_id
-        logger.info(f"✅ حصلنا على file_id: {file_id[:15]}...")
+# Upload video to Google Drive
+def upload_video_to_drive(video_path, caption):
+    creds = get_google_drive_credentials()
+    service = build('drive', 'v3', credentials=creds)
+    
+    file_metadata = {
+        'name': os.path.basename(video_path),
+        'parents': [GOOGLE_DRIVE_FOLDER_ID],
+        'description': caption
+    }
+    media = MediaFileUpload(video_path, mimetype='video/mp4')
+    file = service.files().create(body=file_metadata, media_body=media, fields='id,webViewLink').execute()
+    return file.get('id'), file.get('webViewLink')
 
-        await asyncio.sleep(1)
+# Delete video from Google Drive
+def delete_video_from_drive(file_id):
+    creds = get_google_drive_credentials()
+    service = build('drive', 'v3', credentials=creds)
+    service.files().delete(fileId=file_id).execute()
 
-        # 3️⃣ ⭐ إرسال إلى البوت نفسه (لتفعيل webhook في n8n)
-        logger.info("🤖 [3/3] إرسال إلى البوت نفسه (لـ n8n webhook)")
-        await bot.send_video(
-            chat_id=SELF_CHAT_ID,
-            video=file_id,  # ← استخدام file_id (أفضل من إعادة رفع الملف)
-            caption=video["caption"],
-            supports_streaming=True
-        )
-        logger.info("✅ أُرسل إلى البوت بنجاح — سيتم تفعيل /webhook الآن!")
+# Publish video to Instagram
+def publish_video_to_instagram(video_url, caption):
+    url = f'https://graph.facebook.com/v17.0/{INSTAGRAM_ACCOUNT_ID}/media'
+    payload = {
+        'video_url': video_url,
+        'caption': caption,
+        'access_token': INSTAGRAM_GRAPH_API_TOKEN
+    }
+    response = requests.post(url, data=payload)
+    if response.status_code == 200:
+        creation_id = response.json().get('id')
+        publish_url = f'https://graph.facebook.com/v17.0/{INSTAGRAM_ACCOUNT_ID}/media_publish'
+        publish_payload = {
+            'creation_id': creation_id,
+            'access_token': INSTAGRAM_GRAPH_API_TOKEN
+        }
+        publish_response = requests.post(publish_url, data=publish_payload)
+        if publish_response.status_code == 200:
+            return True, publish_response.json().get('id')
+        else:
+            print(f"Error publishing video: {publish_response.text}")
+            return False, None
+    else:
+        print(f"Error uploading video: {response.text}")
+        return False, None
 
-        return True
+# Process video
+def process_video(video_path, caption):
+    file_id, video_url = upload_video_to_drive(video_path, caption)
+    print(f"Uploaded video to Google Drive: {video_url}")
+    success, post_id = publish_video_to_instagram(video_url, caption)
+    if success:
+        print(f"Published video to Instagram: {post_id}")
+        delete_video_from_drive(file_id)
+        print(f"Deleted video from Google Drive: {file_id}")
+    else:
+        print("Failed to publish video to Instagram")
 
-    except Exception as e:
-        logger.error(f"❌ فشل دورة الإرسال: {e}")
-        return False
+# Main loop
+def main_loop():
+    videos_dir = 'videos'
+    video_files = sorted([f for f in os.listdir(videos_dir) if f.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv'))])
+    
+    for video_file in video_files:
+        video_path = os.path.join(videos_dir, video_file)
+        caption = os.path.splitext(video_file)[0]  # Use filename as caption
+        process_video(video_path, caption)
+        time.sleep(300)  # Wait for 5 minutes
 
-# =============== الحلقة الدورية ===============
-async def video_sender_loop():
-    logger.info("🔁 بدء حلقة إرسال الفيديوهات...")
-    bot = Bot(token=BOT_TOKEN)
+    # Repeat the loop
+    schedule.every(5).minutes.do(main_loop)
 
+# Start the loop
+if __name__ == '__main__':
+    main_loop()
     while True:
-        try:
-            videos = scan_videos()
-            if not videos:
-                logger.warning("📭 لا توجد فيديوهات — انتظر 60 ثانية")
-                await asyncio.sleep(60)
-                continue
-
-            state = load_state()
-            current_list = [v["filename"] for v in videos]
-            if state["videos_list"] != current_list:
-                logger.info("🔄 تحديث قائمة الفيديوهات")
-                state.update({"videos_list": current_list, "last_sent_index": -1})
-
-            next_idx = (state["last_sent_index"] + 1) % len(videos)
-            video = videos[next_idx]
-
-            logger.info(f"🎬 إرسال: {video['filename']} ({next_idx + 1}/{len(videos)})")
-            if await send_video_cycle(bot, video):
-                state["last_sent_index"] = next_idx
-                state["last_sent_time"] = datetime.now().isoformat()
-                save_state(state)
-
-            logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية...")
-            await asyncio.sleep(SEND_INTERVAL)
-
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            logger.exception(f"💥 خطأ في الحلقة: {e}")
-            await asyncio.sleep(30)
-
-# =============== Keep-Alive (لـ Render) ===============
-def keep_alive():
-    while True:
-        try:
-            requests.get(f"http://localhost:{PORT}/health", timeout=5)
-        except:
-            pass
-        time.sleep(250)
-
-# =============== التشغيل ===============
-START_TIME = time.time()
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("🚀 Telegram Video Relay Bot — جاهز لـ n8n")
-    print(f"   🌐 Webhook: POST /webhook")
-    print(f"   📁 مجلد الفيديوهات: {os.path.abspath(VIDEOS_DIR)}")
-    print(f"   🕒 كل {SEND_INTERVAL} ثانية")
-    print(f"   📞 Chat ID: {CHAT_ID}")
-    print(f"   📢 Channel ID: {CHANNEL_ID}")
-    print(f"   🤖 Self ID (لـ n8n): {SELF_CHAT_ID}")
-    print("=" * 60)
-
-    # تشغيل Flask في thread منفصل
-    flask_thread = threading.Thread(target=lambda: app.run(
-        host="0.0.0.0",
-        port=PORT,
-        debug=False,
-        use_reloader=False
-    ), daemon=True)
-    flask_thread.start()
-
-    # تشغيل keep-alive
-    threading.Thread(target=keep_alive, daemon=True).start()
-
-    # تشغيل الحلقة الدورية (async)
-    try:
-        asyncio.run(video_sender_loop())
-    except KeyboardInterrupt:
-        logger.info("👋 تم الإيقاف يدويًا")
-    except Exception as e:
-        logger.critical(f"🔥 خطأ فادح: {e}")
+        schedule.run_pending()
+        time.sleep(1)
