@@ -40,7 +40,7 @@ LOG_FILE = "video_bot.log"
 
 # ================== FLASK APP ==================
 app = Flask(__name__)
-CORS(app)  # تفعيل CORS للسماح لـ Zapier بالوصول
+CORS(app)  # تفعيل CORS للسماح بالوصول من أي مصدر
 
 # ================== LOGGING ==================
 logging.basicConfig(
@@ -103,6 +103,16 @@ class VideoDatabase:
                        key=lambda x: x.get('created_at', ''), 
                        reverse=True)
         return videos[:limit]
+    
+    def search_videos(self, keyword):
+        """بحث في الفيديوهات"""
+        results = []
+        keyword = keyword.lower()
+        for video in self.data["videos"]:
+            caption = video.get('caption', '').lower()
+            if keyword in caption:
+                results.append(video)
+        return results
 
 # إنشاء كائن قاعدة البيانات
 db = VideoDatabase()
@@ -116,9 +126,11 @@ def home():
         "endpoints": {
             "all_videos": "/api/videos",
             "latest_videos": "/api/videos/latest",
+            "search_videos": "/api/videos/search?q=كلمة",
             "video_info": "/api/video/<id>",
             "video_file": "/video/<id>",
             "video_download": "/download/<id>",
+            "videos_page": "/videos",
             "health": "/health"
         },
         "timestamp": datetime.now().isoformat(),
@@ -131,7 +143,7 @@ def health():
 
 @app.route('/api/videos')
 def api_all_videos():
-    """API للحصول على جميع الفيديوهات (للاستخدام مع Zapier)"""
+    """API للحصول على جميع الفيديوهات"""
     videos = db.get_all_videos()
     return jsonify({
         "count": len(videos),
@@ -146,6 +158,20 @@ def api_latest_videos():
     return jsonify({
         "count": len(videos),
         "limit": limit,
+        "videos": videos
+    })
+
+@app.route('/api/videos/search')
+def api_search_videos():
+    """API للبحث في الفيديوهات"""
+    keyword = request.args.get('q', '')
+    if not keyword:
+        return jsonify({"error": "يرجى إدخال كلمة للبحث"}), 400
+    
+    videos = db.search_videos(keyword)
+    return jsonify({
+        "count": len(videos),
+        "keyword": keyword,
         "videos": videos
     })
 
@@ -198,39 +224,135 @@ def videos_page():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>SaveVideoBot - جميع الفيديوهات</title>
         <style>
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+            
             body {
-                font-family: Arial, sans-serif;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                 direction: rtl;
                 text-align: right;
-                padding: 20px;
-                background-color: #f5f5f5;
+                line-height: 1.6;
+                color: #333;
+                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                min-height: 100vh;
             }
+            
             .container {
-                max-width: 1200px;
+                max-width: 1400px;
                 margin: 0 auto;
+                padding: 20px;
             }
+            
             .header {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
-                padding: 30px;
-                border-radius: 10px;
-                margin-bottom: 30px;
+                padding: 40px 30px;
+                border-radius: 15px;
+                margin-bottom: 40px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                text-align: center;
             }
-            .video-grid {
+            
+            .header h1 {
+                font-size: 2.8rem;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 15px;
+            }
+            
+            .header p {
+                font-size: 1.2rem;
+                opacity: 0.9;
+                max-width: 800px;
+                margin: 0 auto;
+            }
+            
+            .stats-card {
+                background: white;
+                padding: 25px;
+                border-radius: 15px;
+                margin-bottom: 30px;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
                 display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
                 gap: 20px;
             }
-            .video-card {
-                background: white;
+            
+            .stat-item {
+                text-align: center;
+                padding: 15px;
+                background: #f8f9fa;
                 border-radius: 10px;
-                overflow: hidden;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
                 transition: transform 0.3s;
             }
-            .video-card:hover {
+            
+            .stat-item:hover {
                 transform: translateY(-5px);
+                background: #e9ecef;
             }
+            
+            .stat-item h3 {
+                color: #667eea;
+                margin-bottom: 10px;
+                font-size: 1.1rem;
+            }
+            
+            .stat-item p {
+                font-size: 2rem;
+                font-weight: bold;
+                color: #764ba2;
+            }
+            
+            .search-box {
+                background: white;
+                padding: 25px;
+                border-radius: 15px;
+                margin-bottom: 30px;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+            
+            .search-box input {
+                width: 100%;
+                padding: 15px;
+                border: 2px solid #e0e0e0;
+                border-radius: 10px;
+                font-size: 1.1rem;
+                transition: border-color 0.3s;
+            }
+            
+            .search-box input:focus {
+                outline: none;
+                border-color: #667eea;
+            }
+            
+            .video-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+                gap: 25px;
+                margin-bottom: 50px;
+            }
+            
+            .video-card {
+                background: white;
+                border-radius: 15px;
+                overflow: hidden;
+                box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+            }
+            
+            .video-card:hover {
+                transform: translateY(-10px) scale(1.02);
+                box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+            }
+            
             .video-thumbnail {
                 width: 100%;
                 height: 200px;
@@ -239,90 +361,491 @@ def videos_page():
                 align-items: center;
                 justify-content: center;
                 color: white;
-                font-size: 48px;
+                position: relative;
+                overflow: hidden;
             }
+            
+            .video-thumbnail::before {
+                content: '🎬';
+                font-size: 70px;
+                opacity: 0.8;
+            }
+            
             .video-info {
-                padding: 20px;
-            }
-            .video-title {
-                font-weight: bold;
-                margin-bottom: 10px;
-                color: #333;
-            }
-            .video-date {
-                color: #666;
-                font-size: 12px;
-                margin-bottom: 15px;
-            }
-            .video-links {
+                padding: 25px;
+                flex-grow: 1;
                 display: flex;
-                gap: 10px;
-                margin-top: 15px;
+                flex-direction: column;
             }
+            
+            .video-title {
+                font-size: 1.3rem;
+                font-weight: bold;
+                margin-bottom: 15px;
+                color: #2c3e50;
+                line-height: 1.4;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+            
+            .video-meta {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 15px;
+                font-size: 0.9rem;
+                color: #666;
+            }
+            
+            .video-date {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+            }
+            
+            .video-size {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                background: #f0f0f0;
+                padding: 5px 10px;
+                border-radius: 20px;
+            }
+            
+            .video-links {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                margin-top: auto;
+            }
+            
             .btn {
-                padding: 8px 15px;
-                border-radius: 5px;
+                padding: 12px 20px;
+                border-radius: 10px;
                 text-decoration: none;
                 color: white;
-                font-size: 14px;
-                flex: 1;
+                font-weight: 600;
                 text-align: center;
+                transition: all 0.3s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
             }
+            
             .btn-view {
-                background: #4CAF50;
+                background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
             }
+            
+            .btn-view:hover {
+                background: linear-gradient(135deg, #45a049 0%, #1B5E20 100%);
+                transform: translateY(-2px);
+            }
+            
             .btn-download {
-                background: #2196F3;
+                background: linear-gradient(135deg, #2196F3 0%, #0D47A1 100%);
             }
-            .btn-api {
-                background: #FF9800;
+            
+            .btn-download:hover {
+                background: linear-gradient(135deg, #1E88E5 0%, #0D3C82 100%);
+                transform: translateY(-2px);
             }
-            .stats {
+            
+            .api-info {
                 background: white;
+                padding: 30px;
+                border-radius: 15px;
+                margin-top: 40px;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+            
+            .api-info h3 {
+                color: #667eea;
+                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .api-endpoints {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 15px;
+                margin-top: 20px;
+            }
+            
+            .api-endpoint {
+                background: #f8f9fa;
                 padding: 15px;
                 border-radius: 10px;
+                border-left: 4px solid #667eea;
+            }
+            
+            .endpoint-method {
+                display: inline-block;
+                padding: 5px 10px;
+                background: #667eea;
+                color: white;
+                border-radius: 5px;
+                font-size: 0.9rem;
+                margin-bottom: 10px;
+            }
+            
+            .endpoint-url {
+                font-family: monospace;
+                background: #e9ecef;
+                padding: 10px;
+                border-radius: 5px;
+                word-break: break-all;
+                margin-bottom: 10px;
+            }
+            
+            .endpoint-desc {
+                color: #666;
+                font-size: 0.9rem;
+            }
+            
+            .no-videos {
+                text-align: center;
+                padding: 50px;
+                background: white;
+                border-radius: 15px;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+                grid-column: 1 / -1;
+            }
+            
+            .no-videos h3 {
+                color: #667eea;
                 margin-bottom: 20px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                font-size: 1.5rem;
+            }
+            
+            @media (max-width: 768px) {
+                .header h1 {
+                    font-size: 2rem;
+                }
+                
+                .video-grid {
+                    grid-template-columns: 1fr;
+                }
+                
+                .stats-card {
+                    grid-template-columns: 1fr;
+                }
+                
+                .container {
+                    padding: 10px;
+                }
+            }
+            
+            .badge {
+                display: inline-block;
+                padding: 5px 12px;
+                border-radius: 20px;
+                font-size: 0.8rem;
+                font-weight: bold;
+                margin-left: 10px;
+            }
+            
+            .badge-new {
+                background: #4CAF50;
+                color: white;
+            }
+            
+            .badge-popular {
+                background: #FF9800;
+                color: white;
             }
         </style>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     </head>
     <body>
         <div class="container">
+            <!-- الهيدر -->
             <div class="header">
-                <h1>📹 SaveVideoBot</h1>
-                <p>جميع الفيديوهات المحفوظة - روابط عامة للجميع</p>
+                <h1><i class="fas fa-video"></i> SaveVideoBot</h1>
+                <p>نظام حفظ الفيديوهات من تلغرام وتوليد روابط عامة للمشاهدة والتحميل</p>
             </div>
             
-            <div class="stats">
-                <h3>📊 الإحصائيات</h3>
-                <p>إجمالي الفيديوهات: <strong>""" + str(len(videos)) + """</strong></p>
-                <p>📎 رابط API للاستخدام مع Zapier: <code>""" + BASE_URL + """/api/videos</code></p>
+            <!-- إحصائيات -->
+            <div class="stats-card">
+                <div class="stat-item">
+                    <h3><i class="fas fa-film"></i> إجمالي الفيديوهات</h3>
+                    <p>""" + str(len(videos)) + """</p>
+                </div>
+                <div class="stat-item">
+                    <h3><i class="fas fa-server"></i> حالة الخادم</h3>
+                    <p style="color: #4CAF50;"><i class="fas fa-circle"></i> نشط</p>
+                </div>
+                <div class="stat-item">
+                    <h3><i class="fas fa-link"></i> رابط التطبيق</h3>
+                    <p style="font-size: 1rem;">""" + BASE_URL + """</p>
+                </div>
             </div>
             
-            <div class="video-grid">
+            <!-- صندوق البحث -->
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="🔍 ابحث في الفيديوهات... (اضغط Enter للبحث)">
+                <div id="searchResults" style="margin-top: 20px; display: none;"></div>
+            </div>
+            
+            <!-- شبكة الفيديوهات -->
+            <div class="video-grid" id="videoGrid">
     """
     
-    for video in reversed(videos):  # عرض أحدث الفيديوهات أولاً
-        html += f"""
+    if videos:
+        # عرض أحدث الفيديوهات أولاً
+        for i, video in enumerate(reversed(videos)):
+            # حساب الوقت المنقضي
+            created_at = video.get('created_at', '')
+            time_ago = ""
+            if created_at:
+                try:
+                    created_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                    now = datetime.now()
+                    diff = now - created_date
+                    
+                    if diff.days > 0:
+                        time_ago = f"منذ {diff.days} يوم"
+                    elif diff.seconds // 3600 > 0:
+                        time_ago = f"منذ {diff.seconds // 3600} ساعة"
+                    else:
+                        time_ago = f"منذ {diff.seconds // 60} دقيقة"
+                except:
+                    time_ago = created_at
+            else:
+                time_ago = "غير معروف"
+            
+            # إضافة badges
+            badges = ""
+            if i < 3:  # أول 3 فيديوهات تعتبر جديدة
+                badges = '<span class="badge badge-new">جديد</span>'
+            
+            html += f"""
                 <div class="video-card">
                     <div class="video-thumbnail">
-                        <span>🎬</span>
+                        {badges}
                     </div>
                     <div class="video-info">
-                        <div class="video-title">{video.get('caption', 'بدون عنوان')}</div>
-                        <div class="video-date">📅 {video.get('created_at', '')}</div>
-                        <div class="video-size">📦 {video.get('size_mb', 0):.1f} MB</div>
+                        <div class="video-title">
+                            {video.get('caption', 'بدون عنوان')[:100]}
+                            {'' if len(video.get('caption', '')) <= 100 else '...'}
+                        </div>
+                        <div class="video-meta">
+                            <div class="video-date">
+                                <i class="far fa-calendar"></i>
+                                {time_ago}
+                            </div>
+                            <div class="video-size">
+                                <i class="fas fa-weight-hanging"></i>
+                                {video.get('size_mb', 0):.1f} MB
+                            </div>
+                        </div>
                         <div class="video-links">
-                            <a href="{video.get('public_url')}" class="btn btn-view" target="_blank">👁️ مشاهدة</a>
-                            <a href="{video.get('download_url')}" class="btn btn-download" target="_blank">📥 تحميل</a>
+                            <a href="{video.get('public_url')}" class="btn btn-view" target="_blank">
+                                <i class="fas fa-eye"></i>
+                                مشاهدة
+                            </a>
+                            <a href="{video.get('download_url')}" class="btn btn-download" target="_blank">
+                                <i class="fas fa-download"></i>
+                                تحميل
+                            </a>
                         </div>
                     </div>
                 </div>
+            """
+    else:
+        html += """
+            <div class="no-videos">
+                <h3><i class="fas fa-film"></i> لا توجد فيديوهات حالياً</h3>
+                <p>أرسل فيديوهات في قناتك على تلغرام وسيتم حفظها هنا تلقائياً</p>
+            </div>
         """
     
     html += """
             </div>
+            
+            <!-- معلومات API -->
+            <div class="api-info">
+                <h3><i class="fas fa-code"></i> واجهة برمجة التطبيق (API)</h3>
+                <p>يمكنك استخدام هذه النقاط للحصول على بيانات الفيديوهات برمجياً:</p>
+                
+                <div class="api-endpoints">
+                    <div class="api-endpoint">
+                        <span class="endpoint-method">GET</span>
+                        <div class="endpoint-url">""" + BASE_URL + """/api/videos</div>
+                        <div class="endpoint-desc">جميع الفيديوهات بتنسيق JSON</div>
+                    </div>
+                    
+                    <div class="api-endpoint">
+                        <span class="endpoint-method">GET</span>
+                        <div class="endpoint-url">""" + BASE_URL + """/api/videos/latest?limit=10</div>
+                        <div class="endpoint-desc">أحدث الفيديوهات (تحديد العدد بمعامل limit)</div>
+                    </div>
+                    
+                    <div class="api-endpoint">
+                        <span class="endpoint-method">GET</span>
+                        <div class="endpoint-url">""" + BASE_URL + """/api/videos/search?q=كلمة</div>
+                        <div class="endpoint-desc">البحث في الفيديوهات حسب الكلمة</div>
+                    </div>
+                    
+                    <div class="api-endpoint">
+                        <span class="endpoint-method">GET</span>
+                        <div class="endpoint-url">""" + BASE_URL + """/api/video/{id}</div>
+                        <div class="endpoint-desc">معلومات فيديو محدد حسب المعرف</div>
+                    </div>
+                </div>
+            </div>
         </div>
+        
+        <script>
+            // وظيفة البحث
+            const searchInput = document.getElementById('searchInput');
+            const videoGrid = document.getElementById('videoGrid');
+            const searchResults = document.getElementById('searchResults');
+            
+            searchInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    const keyword = this.value.trim();
+                    if (keyword) {
+                        searchVideos(keyword);
+                    } else {
+                        // إذا كان البحث فارغاً، إعادة عرض كل الفيديوهات
+                        fetch('/api/videos')
+                            .then(response => response.json())
+                            .then(data => {
+                                updateVideoGrid(data.videos);
+                                searchResults.style.display = 'none';
+                                searchResults.innerHTML = '';
+                            });
+                    }
+                }
+            });
+            
+            function searchVideos(keyword) {
+                fetch(`/api/videos/search?q=${encodeURIComponent(keyword)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.videos.length > 0) {
+                            updateVideoGrid(data.videos);
+                            searchResults.style.display = 'block';
+                            searchResults.innerHTML = `
+                                <div style="background: #e3f2fd; padding: 15px; border-radius: 10px; border-right: 4px solid #2196F3;">
+                                    <i class="fas fa-search"></i> 
+                                    تم العثور على ${data.count} فيديو لكلمة "${keyword}"
+                                </div>
+                            `;
+                        } else {
+                            searchResults.style.display = 'block';
+                            searchResults.innerHTML = `
+                                <div style="background: #ffebee; padding: 15px; border-radius: 10px; border-right: 4px solid #f44336;">
+                                    <i class="fas fa-exclamation-circle"></i> 
+                                    لم يتم العثور على نتائج لكلمة "${keyword}"
+                                </div>
+                            `;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error searching videos:', error);
+                        searchResults.style.display = 'block';
+                        searchResults.innerHTML = `
+                            <div style="background: #fff3e0; padding: 15px; border-radius: 10px; border-right: 4px solid #ff9800;">
+                                <i class="fas fa-exclamation-triangle"></i> 
+                                حدث خطأ أثناء البحث
+                            </div>
+                        `;
+                    });
+            }
+            
+            function updateVideoGrid(videos) {
+                let html = '';
+                
+                if (videos.length === 0) {
+                    html = `
+                        <div class="no-videos" style="grid-column: 1 / -1;">
+                            <h3><i class="fas fa-film"></i> لا توجد فيديوهات</h3>
+                        </div>
+                    `;
+                } else {
+                    videos.forEach((video, index) => {
+                        const created_at = video.created_at || '';
+                        let time_ago = '';
+                        
+                        if (created_at) {
+                            const createdDate = new Date(created_at);
+                            const now = new Date();
+                            const diff = now - createdDate;
+                            
+                            if (diff > 86400000) {
+                                time_ago = `منذ ${Math.floor(diff / 86400000)} يوم`;
+                            } else if (diff > 3600000) {
+                                time_ago = `منذ ${Math.floor(diff / 3600000)} ساعة`;
+                            } else {
+                                time_ago = `منذ ${Math.floor(diff / 60000)} دقيقة`;
+                            }
+                        }
+                        
+                        let badges = '';
+                        if (index < 3) {
+                            badges = '<span class="badge badge-new">جديد</span>';
+                        }
+                        
+                        html += `
+                            <div class="video-card">
+                                <div class="video-thumbnail">
+                                    ${badges}
+                                </div>
+                                <div class="video-info">
+                                    <div class="video-title">
+                                        ${video.caption ? video.caption.substring(0, 100) : 'بدون عنوان'}
+                                        ${video.caption && video.caption.length > 100 ? '...' : ''}
+                                    </div>
+                                    <div class="video-meta">
+                                        <div class="video-date">
+                                            <i class="far fa-calendar"></i>
+                                            ${time_ago || created_at || 'غير معروف'}
+                                        </div>
+                                        <div class="video-size">
+                                            <i class="fas fa-weight-hanging"></i>
+                                            ${(video.size_mb || 0).toFixed(1)} MB
+                                        </div>
+                                    </div>
+                                    <div class="video-links">
+                                        <a href="${video.public_url}" class="btn btn-view" target="_blank">
+                                            <i class="fas fa-eye"></i>
+                                            مشاهدة
+                                        </a>
+                                        <a href="${video.download_url}" class="btn btn-download" target="_blank">
+                                            <i class="fas fa-download"></i>
+                                            تحميل
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                
+                videoGrid.innerHTML = html;
+            }
+            
+            // تحديث عدد الفيديوهات تلقائياً كل 30 ثانية
+            function updateStats() {
+                fetch('/api/videos')
+                    .then(response => response.json())
+                    .then(data => {
+                        const totalVideos = document.querySelector('.stat-item:first-child p');
+                        if (totalVideos) {
+                            totalVideos.textContent = data.count;
+                        }
+                    });
+            }
+            
+            // تحديث كل 30 ثانية
+            setInterval(updateStats, 30000);
+        </script>
     </body>
     </html>
     """
@@ -409,12 +932,12 @@ async def handle_video_message(update: Update, context: CallbackContext):
 👁️ **مشاهدة مباشرة:** {public_url}
 📥 **تحميل مباشر:** {download_url}
 
-📎 **للاستخدام مع Zapier:**
-• API Link: {BASE_URL}/api/videos
-• Latest Videos: {BASE_URL}/api/videos/latest
-• هذا الفيديو: {BASE_URL}/api/video/{saved_video['id']}
+📎 **معلومات تقنية:**
+• الحجم الأصلي: {saved_video['file_size']:,} بايت
+• نوع الملف: {saved_video['mime_type']}
+• معرف الفيديو: `{saved_video['id']}`
 
-🆔 **معرف الفيديو:** `{saved_video['id']}`
+📊 **إجمالي الفيديوهات:** {len(db.get_all_videos())} فيديو
                 """
                 
                 await processing_msg.delete()
@@ -527,15 +1050,24 @@ def run_keep_alive():
 
 if __name__ == "__main__":
     # طباعة معلومات البدء
-    print("=" * 60)
+    print("=" * 70)
     print("🤖 SaveVideoBot - Advanced Video Saver with Public URLs")
     print(f"📢 Channel/Group ID: {CHAT_ID}")
     print(f"📁 Videos Directory: {os.path.abspath(VIDEOS_DIR)}")
     print(f"🌐 Base URL: {BASE_URL}")
     print(f"🔗 Public Videos Page: {BASE_URL}/videos")
-    print(f"📎 API for Zapier: {BASE_URL}/api/videos")
+    print(f"📎 API Endpoints: {BASE_URL}/api/videos")
+    print(f"🔍 Search API: {BASE_URL}/api/videos/search?q=كلمة")
     print(f"📊 Total Videos: {len(db.get_all_videos())}")
-    print("=" * 60)
+    print("=" * 70)
+    print("\n📋 الميزات المتاحة:")
+    print("✅ حفظ تلقائي للفيديوهات من قناة تلغرام")
+    print("✅ روابط عامة للمشاهدة والتحميل")
+    print("✅ واجهة ويب تفاعلية مع بحث")
+    print("✅ API كامل للوصول للبيانات")
+    print("✅ معالجة الفيديوهات المعاد توجيهها")
+    print("✅ نظام Keep-alive لمنع إيقاف الخادم")
+    print("=" * 70)
     
     # إنشاء threads
     flask_thread = threading.Thread(target=run_flask, daemon=True)
@@ -552,101 +1084,3 @@ if __name__ == "__main__":
         logger.info("👋 إيقاف البرنامج")
     except Exception as e:
         logger.error(f"❌ خطأ غير متوقع: {e}")
-```
-
-## 📋 **متطلبات التشغيل**
-
-### **1. متغيرات البيئة المطلوبة:**
-```bash
-BOT_TOKEN=8212401543:AAHfBzcnW1u2XFBSllTFoJlqOKcK3rIUhxU
-CHAT_ID=-1003218943676  # معرف قناتك @n8ngroupgrh
-BASE_URL=https://n8ngrh.onrender.com  # أو أي رابط للتطبيق
-```
-
-### **2. كيفية الحصول على CHAT_ID:**
-1. أضف البوت `@RawDataBot` إلى قناتك
-2. أرسل أي رسالة في القناة
-3. سيرسل لك البوت معرف القناة (رقم سالب مثل `-1003218943676`)
-
-### **3. تكوين Zapier:**
-1. في Zapier، أنشئ **Webhook Zap**
-2. استخدم الرابط: `https://your-app.onrender.com/api/videos/latest`
-3. سيحصل Zapier على أحدث الفيديوهات مع:
-   - `public_url`: رابط المشاهدة المباشرة
-   - `download_url`: رابط التحميل
-   - `caption`: التسمية التوضيحية
-   - `created_at`: وقت الإنشاء
-
-### **4. ميزات البوت:**
-✅ **حفظ تلقائي**: أي فيديو يرسل في القناة يحفظ تلقائياً  
-✅ **روابط عامة**: كل فيديو له رابط مشاهدة وتحميل  
-✅ **واجهة ويب**: صفحة لعرض جميع الفيديوهات  
-✅ **API لـ Zapier**: نقاط نهاية RESTful للاستخدام مع Zapier  
-✅ **معالجة الفيديوهات المعاد توجيهها**  
-✅ **Keep-alive**: يمنع إيقاف التطبيق في Render  
-
-### **5. نقاط API المتاحة:**
-```
-/                   ← صفحة الرئيسية
-/videos             ← صفحة ويب لعرض جميع الفيديوهات
-/api/videos         ← جميع الفيديوهات (JSON)
-/api/videos/latest  ← أحدث 10 فيديوهات
-/api/video/{id}     ← معلومات فيديو محدد
-/video/{id}         ← مشاهدة الفيديو
-/download/{id}      ← تحميل الفيديو
-/health             ← حالة التطبيق
-```
-
-### **6. مثال لاستجابة API (لـ Zapier):**
-```json
-{
-  "count": 5,
-  "videos": [
-    {
-      "id": "uuid-here",
-      "filename": "video_123456789.mp4",
-      "caption": "عنوان الفيديو",
-      "public_url": "https://your-app.onrender.com/video/uuid-here",
-      "download_url": "https://your-app.onrender.com/download/uuid-here",
-      "created_at": "2024-01-15T10:30:00",
-      "size_mb": 15.5
-    }
-  ]
-}
-```
-
-### **7. deployment على Render:**
-1. انشئ ملف `requirements.txt`:
-```txt
-flask
-python-telegram-bot
-requests
-flask-cors
-```
-
-2. انشئ ملف `render.yaml`:
-```yaml
-services:
-  - type: web
-    name: savevideobot
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
-    envVars:
-      - key: BOT_TOKEN
-        sync: false
-      - key: CHAT_ID
-        sync: false
-      - key: BASE_URL
-        fromService:
-          name: savevideobot
-          type: web
-          property: url
-```
-
-3. انشر على Render وسيصبح لديك:
-   - رابط تطبيق عام
-   - كل فيديو في قناتك يحفظ ويولد له رابط
-   - واجهة API لاستخدامها مع Zapier
-
-البوت جاهز للاستخدام مباشرة! فقط عين متغيرات البيئة وابدأ الإرسال في قناتك.
