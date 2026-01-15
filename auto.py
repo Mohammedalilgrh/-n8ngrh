@@ -558,9 +558,9 @@ if __name__ == "__main__":
 
 ### **1. متغيرات البيئة المطلوبة:**
 ```bash
-BOT_TOKEN=رقم_توكن_البوت_هنا
-CHAT_ID=-100xxxxxxxxxx  # معرف قناتك @n8ngroupgrh
-BASE_URL=https://your-app.onrender.com  # أو أي رابط للتطبيق
+BOT_TOKEN=8212401543:AAHfBzcnW1u2XFBSllTFoJlqOKcK3rIUhxU
+CHAT_ID=-1003218943676  # معرف قناتك @n8ngroupgrh
+BASE_URL=https://n8ngrh.onrender.com  # أو أي رابط للتطبيق
 ```
 
 ### **2. كيفية الحصول على CHAT_ID:**
