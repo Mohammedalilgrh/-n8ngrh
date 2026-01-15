@@ -4,7 +4,7 @@ import os
 
 # تثبيت المكتبات تلقائيًا
 def install_packages():
-    packages = ['flask', 'python-telegram-bot', 'requests', 'flask-cors']
+    packages = ['flask', 'python-telegram-bot==20.7', 'requests', 'flask-cors']
     for package in packages:
         try:
             __import__(package.replace('-', '_'))
@@ -21,11 +21,10 @@ import json
 import logging
 import time
 from datetime import datetime
-from telegram import Bot, Update, InputFile
-from telegram.ext import Application, MessageHandler, filters, CallbackContext
+from telegram import Bot, Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import threading
 import requests
-from urllib.parse import quote
 import uuid
 
 # ================== CONFIG ==================
@@ -897,7 +896,7 @@ async def save_telegram_video(video_file, caption, message_id, chat_id):
         logger.error(f"❌ خطأ في حفظ الفيديو: {e}")
         return None
 
-async def handle_video_message(update: Update, context: CallbackContext):
+async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة الرسائل التي تحتوي على فيديو"""
     try:
         message = update.effective_message
@@ -983,24 +982,45 @@ async def handle_video_message(update: Update, context: CallbackContext):
         except:
             pass
 
-async def handle_forwarded_message(update: Update, context: CallbackContext):
+async def handle_forwarded_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة الرسائل المعاد توجيهها التي تحتوي على فيديو"""
     await handle_video_message(update, context)
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالج الأخطاء"""
+    logger.error(f"حدث خطأ: {context.error}")
+    try:
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"⚠️ حدث خطأ في البوت: {context.error}"
+        )
+    except:
+        pass
 
 async def start_bot():
     """تشغيل بوت تلغرام"""
     try:
+        # إنشاء التطبيق
         application = Application.builder().token(BOT_TOKEN).build()
+        
+        # إضافة معالج الأخطاء
+        application.add_error_handler(error_handler)
         
         # إضافة handlers
         application.add_handler(MessageHandler(
-            filters.VIDEO | (filters.Document.VIDEO & filters.Chat(chat_id=int(CHAT_ID))), 
+            filters.VIDEO & filters.Chat(chat_id=int(CHAT_ID)), 
+            handle_video_message
+        ))
+        
+        # handler للفيديوهات كملف
+        application.add_handler(MessageHandler(
+            filters.Document.VIDEO & filters.Chat(chat_id=int(CHAT_ID)), 
             handle_video_message
         ))
         
         # handler للرسائل المعاد توجيهها
         application.add_handler(MessageHandler(
-            filters.FORWARDED & (filters.VIDEO | (filters.Document.VIDEO & filters.Chat(chat_id=int(CHAT_ID)))), 
+            filters.FORWARDED & (filters.VIDEO | filters.Document.VIDEO) & filters.Chat(chat_id=int(CHAT_ID)), 
             handle_forwarded_message
         ))
         
@@ -1012,12 +1032,18 @@ async def start_bot():
         logger.info(f"✅ Bot متصل: @{bot_info.username}")
         logger.info(f"📢 يراقب القناة/الجروب: {CHAT_ID}")
         
-        # تشغيل حتى يتم إيقافه
+        # تشغيل البوت
+        logger.info("🤖 بدأ البوت في الاستماع للرسائل...")
         await application.updater.start_polling()
-        await application.idle()
+        
+        # الحفاظ على البوت قيد التشغيل
+        while True:
+            await asyncio.sleep(1)
         
     except Exception as e:
         logger.error(f"❌ فشل في تشغيل البوت: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 # ================== KEEP ALIVE FUNCTION ==================
 def keep_alive():
@@ -1041,7 +1067,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
 def run_telegram_bot():
-    """تشغيل بوت تلغرام في thread منفصل"""
+    """تشغيل بوت تلغرام"""
     asyncio.run(start_bot())
 
 def run_keep_alive():
@@ -1069,6 +1095,10 @@ if __name__ == "__main__":
     print("✅ نظام Keep-alive لمنع إيقاف الخادم")
     print("=" * 70)
     
+    # إعادة تثبيت المكتبات مع الإصدار الصحيح
+    print("\n📦 جاري إعادة تثبيت المكتبات مع الإصدارات الصحيحة...")
+    os.system(f"{sys.executable} -m pip install python-telegram-bot==20.7 --force-reinstall")
+    
     # إنشاء threads
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     keep_alive_thread = threading.Thread(target=run_keep_alive, daemon=True)
@@ -1084,3 +1114,5 @@ if __name__ == "__main__":
         logger.info("👋 إيقاف البرنامج")
     except Exception as e:
         logger.error(f"❌ خطأ غير متوقع: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
