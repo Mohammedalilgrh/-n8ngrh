@@ -1,131 +1,283 @@
+import subprocess
+import sys
+
+# تثبيت المكتبات تلقائيًا
+def install_packages():
+    packages = ['flask', 'python-telegram-bot', 'requests']
+    for package in packages:
+        try:
+            __import__(package.replace('-', '_'))
+        except ImportError:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', package])
+
+install_packages()
+
+# ثم استمر في باقي imports
+from flask import Flask, jsonify, request
 import os
-import time
+import asyncio
 import json
+import logging
+import time
+from datetime import datetime
+from telegram import Bot, error as telegram_error
+import threading
 import requests
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-import schedule
-import base64
-import pickle
 
-# Constants
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
-GOOGLE_DRIVE_FOLDER_ID = '10Hk6ZQaDiXuHe-k8J9_Rc11UeQ7iTE14'
-INSTAGRAM_ACCOUNT_ID = '61219445676'
-INSTAGRAM_GRAPH_API_TOKEN = 'EAAaoHv9aJ5gBQTq7k7V019hwK5eybC3ZCrrErXsAZBUZC3pTGk2JDxJPSlUoJfVR0nDLtFfdmixZAZAodls8a80kXuBDuxJ1RZCfEKp8QB6qrKFgskF4ewuuVG4LzRD6lfrYrLlpt4liOEqe91bRWxwA7z482zewY8TbOyH3CnwtSuUWtXYnxsLNWk344nQ8zEix7WI1Tja3tWxTzboZAMTZCSusiSOwdJni3HctIVkZD'
+PORT = int(os.environ.get('PORT', 10000))  # تعريف PORT هنا
+# [باقي الكود كما هو...]
+# ================== FLASK APP ==================
+app = Flask(__name__)
 
-# Google Drive Client Credentials
-GOOGLE_CLIENT_ID = '468168778821-mr3jp6kj5ssomi8vc25q9h8pc05egtqe.apps.googleusercontent.com'
-GOOGLE_CLIENT_SECRET = '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'
-GOOGLE_REDIRECT_URI = 'urn:ietf:wg:oauth:2.0:oob'
+@app.route('/')
+def home():
+    return jsonify({
+        "status": "running",
+        "message": "Telegram Video Bot is active",
+        "timestamp": datetime.now().isoformat()
+    })
 
-# Load or refresh Google Drive credentials
-def get_google_drive_credentials():
-    creds = None
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_config(
-                {
-                    "installed": {
-                        "client_id": GOOGLE_CLIENT_ID,
-                        "project_id": "your-project-id",
-                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                        "token_uri": "https://oauth2.googleapis.com/token",
-                        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                        "client_secret": GOOGLE_CLIENT_SECRET,
-                        "redirect_uris": [GOOGLE_REDIRECT_URI]
-                    }
-                },
-                SCOPES
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy"})
+
+# ================== CONFIG ==================
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8212401543:AAHfBzcnW1u2XFBSllTFoJlqOKcK3rIUhxU")
+CHAT_ID = os.getenv("CHAT_ID", "6968612778")
+
+if CHAT_ID:
+    try:
+        CHAT_ID = int(CHAT_ID)
+    except ValueError:
+        print(f"❌ CHAT_ID غير صالح: {CHAT_ID}")
+        exit(1)
+else:
+    print("❌ CHAT_ID غير موجود")
+    exit(1)
+
+VIDEOS_DIR = "videos"
+SEND_INTERVAL = 300  # 5 دقائق
+STATE_FILE = "state.json"
+LOG_FILE = "bot.log"
+
+# ============================================
+
+# ================== LOGGING ==================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# ================== STATE ==================
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"last_sent_index": -1, "videos_list": [], "last_sent_time": None}
+
+def save_state(state):
+    try:
+        state["updated_at"] = datetime.now().isoformat()
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"خطأ في حفظ state.json: {e}")
+
+# ================== VIDEOS ==================
+# ================== VIDEOS ==================
+# ================== VIDEOS ==================
+def scan_videos():
+    try:
+        os.makedirs(VIDEOS_DIR, exist_ok=True)
+        
+        video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv']
+        videos = []
+        
+        for filename in os.listdir(VIDEOS_DIR):
+            if any(filename.lower().endswith(ext) for ext in video_extensions):
+                filepath = os.path.join(VIDEOS_DIR, filename)
+                if os.path.exists(filepath):
+                    # Remove extension from caption
+                    caption_without_ext = os.path.splitext(filename)[0]
+                    # Add custom text
+                    final_caption = caption_without_ext  # فقط اسم الفيديو بدون أي إضافة
+                    
+                    videos.append({
+                        "path": filepath,
+                        "filename": filename,
+                        "caption": final_caption[:1000],  # Limit to 1000 chars
+                        "size": os.path.getsize(filepath)
+                    })
+        
+        # ترتيب أبجدي
+        videos.sort(key=lambda x: x["filename"])
+        
+        if videos:
+            total_size = sum(v["size"] for v in videos)
+            logger.info(f"📊 تم العثور على {len(videos)} فيديو ({total_size/1024/1024:.1f} MB)")
+        
+        return videos
+    except Exception as e:
+        logger.error(f"خطأ في فحص الفيديوهات: {e}")
+        return []
+
+# ================== BOT ==================
+async def init_bot():
+    if not BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN غير محدد")
+        raise ValueError("BOT_TOKEN غير محدد")
+    
+    try:
+        bot = Bot(token=BOT_TOKEN)
+        bot_info = await bot.get_me()
+        logger.info(f"✅ Bot متصل: @{bot_info.username}")
+        return bot
+    except Exception as e:
+        logger.error(f"❌ فشل الاتصال بالبوت: {e}")
+        raise
+
+async def send_video(bot, video):
+    try:
+        # إرسال إلى الخاص
+        logger.info(f"📤 إرسال إلى الخاص: {video['filename']}")
+        with open(video["path"], "rb") as f:
+            await bot.send_video(
+                chat_id=CHAT_ID,
+                video=f,
+                caption=video["caption"],
+                supports_streaming=True,
+                read_timeout=120,
+                write_timeout=120
             )
-            creds = flow.run_console()
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
-    return creds
 
-# Upload video to Google Drive
-def upload_video_to_drive(video_path, caption):
-    creds = get_google_drive_credentials()
-    service = build('drive', 'v3', credentials=creds)
-    
-    file_metadata = {
-        'name': os.path.basename(video_path),
-        'parents': [GOOGLE_DRIVE_FOLDER_ID],
-        'description': caption
-    }
-    media = MediaFileUpload(video_path, mimetype='video/mp4')
-    file = service.files().create(body=file_metadata, media_body=media, fields='id,webViewLink').execute()
-    return file.get('id'), file.get('webViewLink')
+        # تأخير صغير لتجنب flood control
+        await asyncio.sleep(2)
 
-# Delete video from Google Drive
-def delete_video_from_drive(file_id):
-    creds = get_google_drive_credentials()
-    service = build('drive', 'v3', credentials=creds)
-    service.files().delete(fileId=file_id).execute()
+        # إرسال إلى القناة
+        CHANNEL_ID = -1003218943676
 
-# Publish video to Instagram
-def publish_video_to_instagram(video_url, caption):
-    url = f'https://graph.facebook.com/v17.0/{INSTAGRAM_ACCOUNT_ID}/media'
-    payload = {
-        'video_url': video_url,
-        'caption': caption,
-        'access_token': INSTAGRAM_GRAPH_API_TOKEN
-    }
-    response = requests.post(url, data=payload)
-    if response.status_code == 200:
-        creation_id = response.json().get('id')
-        publish_url = f'https://graph.facebook.com/v17.0/{INSTAGRAM_ACCOUNT_ID}/media_publish'
-        publish_payload = {
-            'creation_id': creation_id,
-            'access_token': INSTAGRAM_GRAPH_API_TOKEN
-        }
-        publish_response = requests.post(publish_url, data=publish_payload)
-        if publish_response.status_code == 200:
-            return True, publish_response.json().get('id')
-        else:
-            print(f"Error publishing video: {publish_response.text}")
-            return False, None
-    else:
-        print(f"Error uploading video: {response.text}")
-        return False, None
+        logger.info(f"📤 إرسال إلى القناة: {video['filename']}")
+        with open(video["path"], "rb") as f:
+            message = await bot.send_video(
+                chat_id=CHANNEL_ID,
+                video=f,
+                caption=video["caption"],
+                supports_streaming=True
+            )
 
-# Process video
-def process_video(video_path, caption):
-    file_id, video_url = upload_video_to_drive(video_path, caption)
-    print(f"Uploaded video to Google Drive: {video_url}")
-    success, post_id = publish_video_to_instagram(video_url, caption)
-    if success:
-        print(f"Published video to Instagram: {post_id}")
-        delete_video_from_drive(file_id)
-        print(f"Deleted video from Google Drive: {file_id}")
-    else:
-        print("Failed to publish video to Instagram")
+        file_id = message.video.file_id
+        logger.info(f"🆔 FILE_ID: {file_id}")
+        return True
 
-# Main loop
-def main_loop():
-    videos_dir = 'videos'
-    video_files = sorted([f for f in os.listdir(videos_dir) if f.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv'))])
-    
-    for video_file in video_files:
-        video_path = os.path.join(videos_dir, video_file)
-        caption = os.path.splitext(video_file)[0]  # Use filename as caption
-        process_video(video_path, caption)
-        time.sleep(300)  # Wait for 5 minutes
-
-    # Repeat the loop
-    schedule.every(5).minutes.do(main_loop)
-
-# Start the loop
-if __name__ == '__main__':
-    main_loop()
+    except telegram_error.RetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        return False
+    except Exception as e:
+        logger.error(f"❌ خطأ في الإرسال: {e}")
+        return False
+# ================== KEEP ALIVE FUNCTION ==================
+def keep_alive():
+    """Function to ping the Render app to keep it awake"""
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        try:
+            response = requests.get(f"http://localhost:{PORT}/health")
+            logger.info(f"Keep-alive ping response: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Keep-alive error: {e}")
+        time.sleep(250)  # Ping every ~4 minutes
+
+# ================== MAIN LOOP ==================
+async def main_loop():
+    logger.info("🚀 بدء تشغيل البوت...")
+    
+    try:
+        bot = await init_bot()
+    except:
+        return
+    
+    while True:
+        try:
+            state = load_state()
+            videos = scan_videos()
+            
+            if not videos:
+                logger.info("📭 لا توجد فيديوهات في المجلد")
+                logger.info(f"📂 ضع الفيديوهات في: {os.path.abspath(VIDEOS_DIR)}")
+                await asyncio.sleep(60)
+                continue
+            
+            # تحديث القائمة إذا تغيرت
+            current_list = [v["filename"] for v in videos]
+            if state["videos_list"] != current_list:
+                logger.info(f"🔄 تم تحديث القائمة: {len(videos)} فيديو")
+                state["videos_list"] = current_list
+                state["last_sent_index"] = -1
+                save_state(state)
+            
+            # الفيديو التالي
+            next_index = (state.get("last_sent_index", -1) + 1) % len(videos)
+            video_to_send = videos[next_index]
+            
+            logger.info(f"🎬 إرسال الفيديو ({next_index+1}/{len(videos)}): {video_to_send['filename']}")
+            
+            # الإرسال
+            if await send_video(bot, video_to_send):
+                state["last_sent_index"] = next_index
+                state["last_sent_time"] = datetime.now().isoformat()
+                save_state(state)
+            
+            logger.info(f"⏳ الانتظار {SEND_INTERVAL} ثانية للفيديو التالي...")
+            await asyncio.sleep(SEND_INTERVAL)
+            
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            logger.error(f"❌ خطأ في الحلقة الرئيسية: {e}")
+            await asyncio.sleep(30)
+
+# ================== RUN BOTH FLASK AND BOT ==================
+def run_flask():
+    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+
+def run_keep_alive():
+    keep_alive()
+
+if __name__ == "__main__":
+    # Get port from environment variable or default to 10000
+    PORT = int(os.environ.get('PORT', 10000))
+    
+    # طباعة معلومات البدء
+    print("=" * 50)
+    print("🤖 Telegram Video Bot - Advanced Version")
+    print(f"👤 Chat ID: {CHAT_ID}")
+    print(f"📁 Videos Directory: {os.path.abspath(VIDEOS_DIR)}")
+    print(f"⏰ Interval: {SEND_INTERVAL} seconds")
+    print(f"🌐 Port: {PORT}")
+    print("=" * 50)
+    
+    # Create threads
+    flask_thread = threading.Thread(target=run_flask)
+    keep_alive_thread = threading.Thread(target=run_keep_alive)
+    
+    # Start threads
+    flask_thread.daemon = True
+    keep_alive_thread.daemon = True
+    
+    flask_thread.start()
+    keep_alive_thread.start()
+    
+    # Run the main loop
+    try:
+        asyncio.run(main_loop())
+    except KeyboardInterrupt:
+        logger.info("👋 إيقاف البرنامج")
+    except Exception as e:
+        logger.error(f"❌ خطأ غير متوقع: {e}")
